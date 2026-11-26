@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Environment variables (JANGAN di-push ke git!)
+.env
+
+# IDE
+.vscode/
+
+# Archives
+*.rar
+*.zip
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Mosquitto local broker (tidak dipakai di cloud)
+mosquitto/

@@ -1,0 +1,83 @@
+/* Custom CSS for Smart Scheduled Room Access Dashboard */
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.4), 0 0 20px rgba(16, 185, 129, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.8), 0 0 30px rgba(16, 185, 129, 0.4);
+  }
+}
+
+.glow-unlocked {
+  animation: pulseGlow 1.5s infinite;
+}
+
+@keyframes countdownAnim {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.animate-countdown {
+  animation: countdownAnim 4s linear forwards;
+}
+
+/* Subtle badge pulse */
+.pulse-badge {
+  position: relative;
+}
+.pulse-badge::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -8px;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.pulse-badge-online::before {
+  background-color: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+.pulse-badge-offline::before {
+  background-color: #9ca3af;
+}
+
+/* Scrollbar polish */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Toast animations */
+.toast-enter {
+  transform: translateY(-20px);
+  opacity: 0;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.toast-enter-active {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* Accent Card Themes */
+.card-merah {
+  border-top: 4px solid #ef4444;
+}
+.card-kuning {
+  border-top: 4px solid #f59e0b;
+}
+.card-hijau {
+  border-top: 4px solid #10b981;
+}

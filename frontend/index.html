@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Scheduled Room Access System - Web Dashboard</title>
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Custom Styling -->
+  <link rel="stylesheet" href="/css/custom.css">
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased">
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col space-y-3 pointer-events-none"></div>
+
+  <!-- TOP NAVBAR -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        
+        <!-- Brand & Live Indicator -->
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-indigo-100">
+            <i class="fa-solid fa-door-open text-lg"></i>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <span class="font-bold text-slate-900 tracking-tight text-lg">SmartRoom<span class="text-indigo-600">Access</span></span>
+              <span class="text-[10px] font-semibold tracking-wider uppercase bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-200">IoT Layer 4</span>
+            </div>
+            <div class="flex items-center space-x-1.5 text-xs text-slate-500">
+              <span id="wsStatusDot" class="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span id="wsStatusText">Menghubungkan ke Server...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Desktop Navigation Tabs -->
+        <nav class="hidden md:flex items-center space-x-1" id="mainNav">
+          <button onclick="switchTab('rooms')" id="nav-rooms" class="nav-tab px-3.5 py-2 text-sm font-medium rounded-lg text-indigo-600 bg-indigo-50 flex items-center space-x-2 transition">
+            <i class="fa-solid fa-gauge-high"></i>
+            <span>Monitoring Ruangan</span>
+          </button>
+          <button onclick="switchTab('schedules')" id="nav-schedules" class="nav-tab px-3.5 py-2 text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 flex items-center space-x-2 transition">
+            <i class="fa-regular fa-calendar-check"></i>
+            <span>Jadwal Ruangan</span>
+          </button>
+          <button onclick="switchTab('users')" id="nav-users" class="nav-tab px-3.5 py-2 text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 flex items-center space-x-2 transition">
+            <i class="fa-solid fa-id-card-clip"></i>
+            <span>Pengguna & RFID</span>
+            <span id="adminBadgeTag" class="hidden text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded font-semibold">Admin</span>
+          </button>
+          <button onclick="switchTab('logs')" id="nav-logs" class="nav-tab px-3.5 py-2 text-sm font-medium rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 flex items-center space-x-2 transition">
+            <i class="fa-solid fa-clock-rotate-left"></i>
+            <span>Riwayat Akses</span>
+          </button>
+        </nav>
+
+        <!-- User Profile / Auth Action -->
+        <div class="flex items-center space-x-3">
+          <!-- State: Belum Login -->
+          <div id="unauthSection" class="flex items-center space-x-2">
+            <button onclick="openLoginModal()" class="px-3.5 py-1.5 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 border border-indigo-200 rounded-lg transition shadow-sm">
+              <i class="fa-solid fa-right-to-bracket mr-1.5"></i> Masuk
+            </button>
+            <button onclick="openRegisterModal()" class="px-3.5 py-1.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition shadow-sm shadow-indigo-200">
+              Daftar
+            </button>
+          </div>
+
+          <!-- State: Sudah Login -->
+          <div id="authSection" class="hidden flex items-center space-x-3">
+            <div class="text-right hidden sm:block">
+              <div id="userFullName" class="text-sm font-bold text-slate-900 leading-tight">Nama Pengguna</div>
+              <div class="flex items-center justify-end space-x-1.5">
+                <span id="userRoleBadge" class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">MAHASISWA</span>
+                <span id="userNimNip" class="text-xs text-slate-500">123240018</span>
+              </div>
+            </div>
+            <button onclick="logout()" title="Keluar dari sistem" class="w-9 h-9 rounded-lg border border-slate-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition">
+              <i class="fa-solid fa-arrow-right-from-bracket"></i>
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Mobile Nav Bar -->
+    <div class="md:hidden flex border-t border-slate-100 bg-white px-2 py-1 justify-around text-xs">
+      <button onclick="switchTab('rooms')" class="py-2 px-2 text-indigo-600 flex flex-col items-center">
+        <i class="fa-solid fa-gauge-high text-base"></i>
+        <span class="mt-1">Ruangan</span>
+      </button>
+      <button onclick="switchTab('schedules')" class="py-2 px-2 text-slate-600 flex flex-col items-center">
+        <i class="fa-regular fa-calendar-check text-base"></i>
+        <span class="mt-1">Jadwal</span>
+      </button>
+      <button onclick="switchTab('users')" id="mobileNavUsers" class="py-2 px-2 text-slate-600 flex flex-col items-center">
+        <i class="fa-solid fa-id-card-clip text-base"></i>
+        <span class="mt-1">RFID/User</span>
+      </button>
+      <button onclick="switchTab('logs')" class="py-2 px-2 text-slate-600 flex flex-col items-center">
+        <i class="fa-solid fa-clock-rotate-left text-base"></i>
+        <span class="mt-1">Log Akses</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT CONTAINER -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- ======================================================== -->
+    <!-- TAB 1: MONITORING RUANGAN & LIVE CONTROL                 -->
+    <!-- ======================================================== -->
+    <section id="tab-rooms" class="tab-pane space-y-6">
+      
+      <!-- Stats Overview Row -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-4">
+          <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-id-card"></i>
+          </div>
+          <div>
+            <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Akses Hari Ini</div>
+            <div id="statTotalAkses" class="text-2xl font-bold text-slate-900">0</div>
+          </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-4">
+          <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-door-open"></i>
+          </div>
+          <div>
+            <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Diterima / Granted</div>
+            <div id="statGranted" class="text-2xl font-bold text-emerald-600">0</div>
+          </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-4">
+          <div class="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-ban"></i>
+          </div>
+          <div>
+            <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">Ditolak / Denied</div>
+            <div id="statDenied" class="text-2xl font-bold text-rose-600">0</div>
+          </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-4">
+          <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl">
+            <i class="fa-solid fa-microchip"></i>
+          </div>
+          <div>
+            <div class="text-xs font-medium text-slate-500 uppercase tracking-wider">ESP32 Controller</div>
+            <div id="statOnlineDevices" class="text-2xl font-bold text-indigo-600">0 / 1 Offline</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section Title -->
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="text-xl font-bold text-slate-900">Status & Kontrol Ruangan Real-Time</h1>
+          <p class="text-sm text-slate-500">Pemantauan status perangkat NodeMCU ESP32, kondisi solenoid door lock, dan jadwal aktif saat ini.</p>
+        </div>
+        <button onclick="loadRoomsData()" class="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-sm flex items-center space-x-1.5 transition">
+          <i class="fa-solid fa-rotate"></i>
+          <span>Muat Ulang</span>
+        </button>
+      </div>
+
+      <!-- 3 Room Cards Grid (Merah, Kuning, Hijau) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="roomsContainer">
+        <!-- Room Cards will be injected dynamically via JS -->
+      </div>
+
+      <!-- Live Access Log Stream (Auto-updating via WebSocket) -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <span class="relative flex h-3 w-3">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <h2 class="font-bold text-slate-900">Live Access Log Feed (MQTT Stream)</h2>
+          </div>
+          <button onclick="switchTab('logs')" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition">
+            Lihat Semua Riwayat &rarr;
+          </button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead class="bg-slate-50 border-b border-slate-100 text-xs text-slate-500 uppercase tracking-wider">
+              <tr>
+                <th class="py-3 px-4">Waktu</th>
+                <th class="py-3 px-4">Ruangan</th>
+                <th class="py-3 px-4">Pengguna</th>
+                <th class="py-3 px-4">Metode</th>
+                <th class="py-3 px-4">UID / Info</th>
+                <th class="py-3 px-4">Status</th>
+                <th class="py-3 px-4">Keterangan</th>
+              </tr>
+            </thead>
+            <tbody id="liveLogTableBody" class="divide-y divide-slate-100">
+              <tr>
+                <td colspan="7" class="py-8 text-center text-slate-400">
+                  <i class="fa-solid fa-circle-notch fa-spin mr-2"></i> Memuat log terkini...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- TAB 2: JADWAL RUANGAN (SCHEDULES)                        -->
+    <!-- ======================================================== -->
+    <section id="tab-schedules" class="tab-pane hidden space-y-6">
+      
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 class="text-xl font-bold text-slate-900">Manajemen & Pengajuan Jadwal Ruangan</h1>
+          <p class="text-sm text-slate-500">Atur peminjaman ruang Merah, Kuning, dan Hijau dengan sistem validasi anti-bentrok.</p>
+        </div>
+        <button onclick="openScheduleModal()" class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition">
+          <i class="fa-solid fa-plus mr-2"></i> Ajukan Jadwal Baru
+        </button>
+      </div>
+
+      <!-- Filter Bar -->
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-3 items-center justify-between">
+        <div class="flex flex-wrap gap-2 items-center flex-1">
+          <!-- Room Filter -->
+          <select id="filterSchedRoom" onchange="loadSchedulesData()" class="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">Semua Ruangan</option>
+            <option value="MERAH">Ruang Merah</option>
+          </select>
+
+          <!-- Status Filter -->
+          <select id="filterSchedStatus" onchange="loadSchedulesData()" class="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">Semua Status</option>
+            <option value="pending">Menunggu (Pending)</option>
+            <option value="approved">Disetujui (Approved)</option>
+            <option value="rejected">Ditolak (Rejected)</option>
+          </select>
+
+          <!-- Date Filter -->
+          <input type="date" id="filterSchedDate" onchange="loadSchedulesData()" class="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          
+          <button onclick="resetScheduleFilters()" class="text-xs text-slate-500 hover:text-slate-800 px-2 py-2">
+            <i class="fa-solid fa-xmark mr-1"></i> Reset
+          </button>
+        </div>
+
+        <div class="w-full sm:w-64">
+          <div class="relative">
+            <input type="text" id="filterSchedSearch" onkeyup="debounce(loadSchedulesData, 300)()" placeholder="Cari nama / NIM / keperluan..." class="w-full text-xs pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-slate-400 text-xs"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Schedules Table -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead class="bg-slate-50 border-b border-slate-100 text-xs text-slate-500 uppercase tracking-wider">
+              <tr>
+                <th class="py-3 px-4">Tanggal Akses</th>
+                <th class="py-3 px-4">Ruangan</th>
+                <th class="py-3 px-4">Jam Akses</th>
+                <th class="py-3 px-4">Peminjam</th>
+                <th class="py-3 px-4">Keperluan</th>
+                <th class="py-3 px-4">Status</th>
+                <th class="py-3 px-4 text-center">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="schedulesTableBody" class="divide-y divide-slate-100">
+              <!-- Content loaded via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- TAB 3: MANAJEMEN PENGGUNA & RFID (ADMIN ONLY)            -->
+    <!-- ======================================================== -->
+    <section id="tab-users" class="tab-pane hidden space-y-6">
+      
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 class="text-xl font-bold text-slate-900">Manajemen Pengguna & Kartu RFID</h1>
+          <p class="text-sm text-slate-500">Kelola akun Dosen, Mahasiswa, Admin, dan sinkronisasi UID kartu RFID fisik.</p>
+        </div>
+        <button onclick="openUserModal()" class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition">
+          <i class="fa-solid fa-user-plus mr-2"></i> Tambah Pengguna Baru
+        </button>
+      </div>
+
+      <!-- Info Banner Auto-Fill UID -->
+      <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-start space-x-3 text-indigo-900">
+        <div class="text-indigo-600 text-xl mt-0.5"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+        <div class="text-xs leading-relaxed">
+          <strong class="font-semibold">Fitur Cepat Pendaftaran Kartu RFID:</strong>
+          Tempelkan kartu RFID baru di pembaca (reader) ruangan mana pun. Kartu yang belum terdaftar akan ditolak sistem dan dicatat. Saat Anda membuka modal "Tambah/Edit Pengguna", cukup klik tombol <span class="font-bold underline text-indigo-700">"Auto-Fill UID dari Tap Terakhir"</span> untuk langsung mengisi nomor UID tanpa perlu mengetik manual!
+        </div>
+      </div>
+
+      <!-- Users Table -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead class="bg-slate-50 border-b border-slate-100 text-xs text-slate-500 uppercase tracking-wider">
+              <tr>
+                <th class="py-3 px-4">NIM / NIP</th>
+                <th class="py-3 px-4">Nama Lengkap</th>
+                <th class="py-3 px-4">Email</th>
+                <th class="py-3 px-4">Role</th>
+                <th class="py-3 px-4">RFID UID</th>
+                <th class="py-3 px-4 text-center">Total Jadwal</th>
+                <th class="py-3 px-4 text-center">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody" class="divide-y divide-slate-100">
+              <!-- Content loaded via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- TAB 4: RIWAYAT AKSES & AUDIT LOG                         -->
+    <!-- ======================================================== -->
+    <section id="tab-logs" class="tab-pane hidden space-y-6">
+      
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 class="text-xl font-bold text-slate-900">Riwayat Akses & Audit Log</h1>
+          <p class="text-sm text-slate-500">Log lengkap seluruh aktivitas tap RFID dan perintah remote unlock pada setiap ruangan.</p>
+        </div>
+        <button onclick="exportLogsCSV()" class="inline-flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl shadow-sm transition">
+          <i class="fa-solid fa-file-csv mr-2 text-base"></i> Export Laporan CSV
+        </button>
+      </div>
+
+      <!-- Filter Controls -->
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-3 items-center justify-between">
+        <div class="flex flex-wrap gap-2 items-center flex-1">
+          <select id="filterLogRoom" onchange="loadLogsData(1)" class="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">Semua Ruangan</option>
+            <option value="MERAH">Ruang Merah</option>
+          </select>
+
+          <select id="filterLogMethod" onchange="loadLogsData(1)" class="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">Semua Metode</option>
+            <option value="rfid">RFID Tap</option>
+            <option value="remote">Remote Unlock</option>
+          </select>
+
+          <select id="filterLogStatus" onchange="loadLogsData(1)" class="text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">Semua Status</option>
+            <option value="granted">Granted (Diterima)</option>
+            <option value="denied">Denied (Ditolak)</option>
+          </select>
+
+          <div class="flex items-center space-x-1 text-xs text-slate-500">
+            <span>Dari:</span>
+            <input type="date" id="filterLogStartDate" onchange="loadLogsData(1)" class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <span>Sampai:</span>
+            <input type="date" id="filterLogEndDate" onchange="loadLogsData(1)" class="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+
+          <button onclick="resetLogFilters()" class="text-xs text-slate-500 hover:text-slate-800 px-2 py-2">
+            <i class="fa-solid fa-xmark mr-1"></i> Reset
+          </button>
+        </div>
+
+        <div class="w-full sm:w-64">
+          <div class="relative">
+            <input type="text" id="filterLogSearch" onkeyup="debounce(() => loadLogsData(1), 300)()" placeholder="Cari nama, NIM, UID..." class="w-full text-xs pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-slate-400 text-xs"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Logs Table -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead class="bg-slate-50 border-b border-slate-100 text-xs text-slate-500 uppercase tracking-wider">
+              <tr>
+                <th class="py-3 px-4">Waktu Tap</th>
+                <th class="py-3 px-4">Ruangan</th>
+                <th class="py-3 px-4">Pengguna (NIM / Nama)</th>
+                <th class="py-3 px-4">Metode</th>
+                <th class="py-3 px-4">UID Kartu</th>
+                <th class="py-3 px-4">Status</th>
+                <th class="py-3 px-4">Keterangan / Alasan</th>
+              </tr>
+            </thead>
+            <tbody id="logsTableBody" class="divide-y divide-slate-100">
+              <!-- Content loaded via JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="px-6 py-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-600">
+          <div>
+            Menampilkan <span id="logRangeStart" class="font-bold">0</span> - <span id="logRangeEnd" class="font-bold">0</span> dari <span id="logTotalCount" class="font-bold">0</span> data
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="btnPrevLog" onclick="changeLogPage(-1)" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none font-medium">
+              &larr; Sebelumnya
+            </button>
+            <span id="logPageIndicator" class="font-semibold">Halaman 1 / 1</span>
+            <button id="btnNextLog" onclick="changeLogPage(1)" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none font-medium">
+              Berikutnya &rarr;
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ======================================================== -->
+  <!-- MODALS                                                   -->
+  <!-- ======================================================== -->
+
+  <!-- 1. LOGIN MODAL -->
+  <div id="loginModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 relative">
+      <button onclick="closeLoginModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+
+      <div class="text-center mb-6">
+        <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl mx-auto mb-3">
+          <i class="fa-solid fa-shield-halved"></i>
+        </div>
+        <h2 class="text-xl font-bold text-slate-900">Masuk ke Akun Anda</h2>
+        <p class="text-xs text-slate-500 mt-1">Gunakan NIM, NIP, atau Email terdaftar</p>
+      </div>
+
+      <!-- Quick Demo Login Buttons -->
+      <div class="mb-5 bg-slate-50 p-3 rounded-xl border border-slate-200">
+        <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Pilih Akun Demo Cepat:</div>
+        <div class="grid grid-cols-3 gap-2">
+          <button type="button" onclick="fillDemoLogin('ADMIN01', 'admin123')" class="px-2 py-1.5 text-xs font-semibold rounded-lg bg-indigo-100 hover:bg-indigo-200 text-indigo-800 transition">
+            Admin
+          </button>
+          <button type="button" onclick="fillDemoLogin('123240018', 'mahasiswa123')" class="px-2 py-1.5 text-xs font-semibold rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition">
+            Mahasiswa
+          </button>
+          <button type="button" onclick="fillDemoLogin('198501012010121001', 'dosen123')" class="px-2 py-1.5 text-xs font-semibold rounded-lg bg-purple-100 hover:bg-purple-200 text-purple-800 transition">
+            Dosen
+          </button>
+        </div>
+      </div>
+
+      <form id="loginForm" onsubmit="handleLoginSubmit(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">NIM / NIP / Email</label>
+          <input type="text" id="loginIdentifier" required placeholder="Contoh: 123240018 atau admin@example.com" class="w-full text-sm px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Kata Sandi (Password)</label>
+          <input type="password" id="loginPassword" required placeholder="••••••••" class="w-full text-sm px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <button type="submit" id="btnLoginSubmit" class="w-full py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition">
+          Masuk Sekarang
+        </button>
+      </form>
+
+      <div class="mt-4 text-center text-xs text-slate-500">
+        Belum memiliki akun? <button onclick="closeLoginModal(); openRegisterModal()" class="text-indigo-600 font-semibold hover:underline">Daftar di sini</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. REGISTER MODAL -->
+  <div id="registerModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 relative max-h-[90vh] overflow-y-auto">
+      <button onclick="closeRegisterModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+
+      <div class="text-center mb-5">
+        <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl mx-auto mb-2">
+          <i class="fa-solid fa-user-plus"></i>
+        </div>
+        <h2 class="text-xl font-bold text-slate-900">Pendaftaran Pengguna Baru</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Daftarkan akun untuk mengajukan peminjaman ruangan</p>
+      </div>
+
+      <form id="registerForm" onsubmit="handleRegisterSubmit(event)" class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">NIM / NIP <span class="text-rose-500">*</span></label>
+          <input type="text" id="regNimNip" required placeholder="Contoh: 123240099" class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Lengkap <span class="text-rose-500">*</span></label>
+          <input type="text" id="regNamaLengkap" required placeholder="Contoh: Budi Santoso" class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Email (Opsional)</label>
+          <input type="email" id="regEmail" placeholder="nama@kampus.ac.id" class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Peran (Role)</label>
+          <select id="regRole" class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="mahasiswa">Mahasiswa</option>
+            <option value="dosen">Dosen</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Kata Sandi <span class="text-rose-500">*</span></label>
+          <input type="password" id="regPassword" required placeholder="Minimal 6 karakter" class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <button type="submit" id="btnRegSubmit" class="w-full py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition mt-2">
+          Daftar Sekarang
+        </button>
+      </form>
+
+      <div class="mt-3 text-center text-xs text-slate-500">
+        Sudah memiliki akun? <button onclick="closeRegisterModal(); openLoginModal()" class="text-indigo-600 font-semibold hover:underline">Masuk di sini</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. PENGAJUAN JADWAL MODAL -->
+  <div id="scheduleModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 relative">
+      <button onclick="closeScheduleModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+
+      <div class="text-center mb-5">
+        <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl mx-auto mb-2">
+          <i class="fa-regular fa-calendar-plus"></i>
+        </div>
+        <h2 class="text-xl font-bold text-slate-900">Pengajuan Peminjaman Ruangan</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Sistem akan secara otomatis memeriksa bentrokan jadwal.</p>
+      </div>
+
+      <form id="scheduleForm" onsubmit="handleScheduleSubmit(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Pilih Ruangan <span class="text-rose-500">*</span></label>
+          <select id="schedRoomId" required class="w-full text-sm px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+            <option value="1">Ruang Merah (esp32-merah)</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Tanggal Akses <span class="text-rose-500">*</span></label>
+          <input type="date" id="schedDate" required class="w-full text-sm px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Jam Mulai <span class="text-rose-500">*</span></label>
+            <input type="time" id="schedStartTime" required class="w-full text-sm px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Jam Selesai <span class="text-rose-500">*</span></label>
+            <input type="time" id="schedEndTime" required class="w-full text-sm px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Keperluan / Keterangan <span class="text-rose-500">*</span></label>
+          <textarea id="schedPurpose" required rows="3" placeholder="Contoh: Praktikum IoT Sistem Tertanam Kelompok 4" class="w-full text-sm px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+        </div>
+
+        <div id="schedConflictAlert" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start space-x-2">
+          <i class="fa-solid fa-triangle-exclamation mt-0.5"></i>
+          <span id="schedConflictMsg">Jadwal bentrok dengan pengguna lain!</span>
+        </div>
+
+        <div class="flex items-center justify-end space-x-2 pt-2">
+          <button type="button" onclick="closeScheduleModal()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Batal
+          </button>
+          <button type="submit" id="btnSubmitSched" class="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition">
+            Kirim Pengajuan
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. USER MODAL (ADD / EDIT USER WITH AUTO-FILL RFID UID) -->
+  <div id="userModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 relative max-h-[90vh] overflow-y-auto">
+      <button onclick="closeUserModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+
+      <div class="text-center mb-5">
+        <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl mx-auto mb-2">
+          <i class="fa-solid fa-id-card"></i>
+        </div>
+        <h2 id="userModalTitle" class="text-xl font-bold text-slate-900">Tambah Pengguna Baru</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Isi data identitas dan hubungkan kartu fisik RFID MFRC522</p>
+      </div>
+
+      <form id="userForm" onsubmit="handleUserSubmit(event)" class="space-y-4">
+        <input type="hidden" id="userFormId">
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">NIM / NIP <span class="text-rose-500">*</span></label>
+            <input type="text" id="userFormNim" required placeholder="Contoh: 123240018" class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Role / Peran <span class="text-rose-500">*</span></label>
+            <select id="userFormRole" required class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+              <option value="mahasiswa">Mahasiswa</option>
+              <option value="dosen">Dosen</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Nama Lengkap <span class="text-rose-500">*</span></label>
+          <input type="text" id="userFormNama" required placeholder="Contoh: Ari Satriya Dinata" class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Email</label>
+          <input type="email" id="userFormEmail" placeholder="ari@example.com" class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+
+        <!-- RFID UID Section with Windows-Key Style Auto-Formatting & Custom Label -->
+        <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+          <div class="flex items-center justify-between">
+            <label class="block text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+              <i class="fa-solid fa-id-card text-indigo-500"></i>
+              <span>Nomor UID Kartu RFID (MFRC522)</span>
+            </label>
+            <button type="button" onclick="fetchLatestUnregisteredUid()" class="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-white hover:bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg transition flex items-center space-x-1 shadow-sm">
+              <i class="fa-solid fa-bolt text-amber-500"></i>
+              <span>Auto-Fill dari Tap Terakhir</span>
+            </button>
+          </div>
+
+          <!-- Windows-Key Style Input -->
+          <div class="relative">
+            <input type="text" id="userFormRfid" maxlength="20" placeholder="XX:XX:XX:XX"
+                   class="w-full text-base px-4 py-2.5 bg-white border-2 border-slate-200 rounded-xl font-mono uppercase tracking-widest text-slate-800 placeholder-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition shadow-inner">
+            <div id="rfidFormatBadge" class="absolute right-3 top-1/2 -translate-y-1/2 hidden">
+              <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
+                <i class="fa-solid fa-circle-check"></i> <span id="rfidBadgeText">Valid (4-Byte)</span>
+              </span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-slate-400">
+            <span>Ketik bebas/paste hex (auto-format otomatis bertitik dua)</span>
+            <span id="rfidBytesCount" class="font-mono">0 / 4 Bytes</span>
+          </div>
+          <p id="rfidDetectionInfo" class="text-[11px] text-slate-500">Tip: Jika baru men-tap kartu di reader fisik, klik tombol Auto-Fill untuk menarik UID secara instan.</p>
+
+          <!-- Custom Card Label / Type -->
+          <div class="pt-2 border-t border-slate-200/60">
+            <label class="block text-xs font-semibold text-slate-700 mb-1.5">Label / Tipe Kartu Fisik</label>
+            <input type="text" id="userFormCardLabel" list="cardTypeSuggestions" placeholder="Misal: e-KTP, KTM Mahasiswa, Keyfob Biru..."
+                   class="w-full text-xs px-3.5 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-700">
+            <datalist id="cardTypeSuggestions">
+              <option value="e-KTP"></option>
+              <option value="KTM Mahasiswa"></option>
+              <option value="Keyfob Biru (1K)"></option>
+              <option value="Kartu Dosen"></option>
+              <option value="Kartu Tamu Lab"></option>
+              <option value="NFC Smartphone"></option>
+            </datalist>
+            <!-- Quick Chips Presets -->
+            <div class="flex flex-wrap gap-1.5 mt-2">
+              <button type="button" onclick="setCardLabelPreset('e-KTP')" class="text-[10px] font-medium px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 hover:border-indigo-300 rounded-lg text-slate-600 transition shadow-xs">🪪 e-KTP</button>
+              <button type="button" onclick="setCardLabelPreset('KTM Mahasiswa')" class="text-[10px] font-medium px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 hover:border-indigo-300 rounded-lg text-slate-600 transition shadow-xs">🎓 KTM Mahasiswa</button>
+              <button type="button" onclick="setCardLabelPreset('Keyfob Biru (1K)')" class="text-[10px] font-medium px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 hover:border-indigo-300 rounded-lg text-slate-600 transition shadow-xs">🔵 Keyfob Biru</button>
+              <button type="button" onclick="setCardLabelPreset('Kartu Dosen')" class="text-[10px] font-medium px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 hover:border-indigo-300 rounded-lg text-slate-600 transition shadow-xs">👨‍🏫 Kartu Dosen</button>
+              <button type="button" onclick="setCardLabelPreset('Kartu Tamu Lab')" class="text-[10px] font-medium px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 hover:border-indigo-300 rounded-lg text-slate-600 transition shadow-xs">🎫 Kartu Tamu</button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Kata Sandi <span id="userPassHint" class="text-slate-400 font-normal">(Kosongkan jika tidak diubah)</span>
+          </label>
+          <input type="password" id="userFormPassword" placeholder="••••••••" class="w-full text-sm px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+
+        <div class="flex items-center justify-end space-x-2 pt-2">
+          <button type="button" onclick="closeUserModal()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Batal
+          </button>
+          <button type="submit" id="btnSubmitUser" class="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition">
+            Simpan Pengguna
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 6. MODAL UBAH JAM AKSES OPERASIONAL RUANGAN (KHUSUS ADMIN) -->
+  <div id="roomHoursModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 relative">
+      <button onclick="closeRoomHoursModal()" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+
+      <div class="text-center mb-5">
+        <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-xl mx-auto mb-2">
+          <i class="fa-solid fa-clock"></i>
+        </div>
+        <h2 id="roomHoursModalTitle" class="text-xl font-bold text-slate-900">Atur Jam Akses Ruangan</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Tentukan jam buka dan jam tutup operasional ruangan</p>
+      </div>
+
+      <form id="roomHoursForm" onsubmit="handleRoomHoursSubmit(event)" class="space-y-4">
+        <input type="hidden" id="editRoomId">
+
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs flex items-center justify-between">
+          <span class="text-slate-500">Ruangan:</span>
+          <span id="editRoomLabel" class="font-bold text-slate-900">Ruang Merah (MERAH)</span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Jam Buka (Mulai) <span class="text-rose-500">*</span></label>
+            <input type="time" id="editJamBuka" required class="w-full text-sm px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Jam Tutup (Selesai) <span class="text-rose-500">*</span></label>
+            <input type="time" id="editJamTutup" required class="w-full text-sm px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
+          </div>
+        </div>
+
+        <div class="text-[11px] text-slate-500 bg-amber-50 border border-amber-200 p-2.5 rounded-xl flex items-start space-x-2 text-amber-800">
+          <i class="fa-solid fa-circle-info mt-0.5 text-amber-600"></i>
+          <span>Pengguna umum tidak akan dapat mengajukan jadwal atau membuka ruangan di luar jam operasional ini.</span>
+        </div>
+
+        <div class="flex items-center justify-end space-x-2 pt-2">
+          <button type="button" onclick="closeRoomHoursModal()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Batal
+          </button>
+          <button type="submit" id="btnSubmitRoomHours" class="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-md shadow-indigo-100 transition">
+            Simpan Jam Akses
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 5. REMOTE UNLOCK CONFIRMATION & COUNTDOWN MODAL -->
+  <div id="unlockModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center">
+      <div id="unlockModalIcon" class="w-16 h-16 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center text-3xl mx-auto mb-4 border border-amber-100">
+        <i class="fa-solid fa-lock-open"></i>
+      </div>
+
+      <h3 id="unlockModalTitle" class="text-lg font-bold text-slate-900 mb-1">Buka Pintu Ruangan</h3>
+      <p id="unlockModalDesc" class="text-xs text-slate-500 mb-5">Apakah Anda yakin ingin membuka solenoid door lock Ruang Merah sekarang?</p>
+
+      <!-- Countdown Animation Container (Active when unlocked) -->
+      <div id="countdownBox" class="hidden mb-5">
+        <div class="text-2xl font-black text-emerald-600 mb-1" id="countdownSeconds">4s</div>
+        <div class="text-[11px] font-semibold text-slate-500 mb-2">Pintu Terbuka! Solenoid akan terkunci otomatis...</div>
+        <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+          <div id="countdownProgressBar" class="h-full bg-emerald-500 w-full animate-countdown"></div>
+        </div>
+      </div>
+
+      <div id="unlockModalActions" class="flex items-center space-x-2 justify-center">
+        <button type="button" onclick="closeUnlockModal()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+          Batal
+        </button>
+        <button type="button" id="btnConfirmUnlock" onclick="executeRemoteUnlock()" class="px-5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-md shadow-emerald-200 transition">
+          Ya, Buka Pintu
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="bg-white border-t border-slate-200 mt-auto py-4">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2">
+      <div>
+        &copy; 2026 <strong>Smart Scheduled Room Access System</strong> - Kelompok IoT Emas.
+      </div>
+      <div class="flex items-center space-x-4">
+        <span>Hardware: ESP32 + MFRC522 + LCD I2C + Solenoid</span>
+        <span class="text-slate-300">|</span>
+        <span>Gateway: MQTT + Express REST</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Main JavaScript App Logic -->
+  <script src="/js/app.js"></script>
+</body>
+</html>
