@@ -345,11 +345,6 @@ async function handleRegisterSubmit(e) {
   }
 }
 
-function fillDemoLogin(id, pass) {
-  document.getElementById('loginIdentifier').value = id;
-  document.getElementById('loginPassword').value = pass;
-}
-
 function logout() {
   currentUser = null;
   currentToken = null;
