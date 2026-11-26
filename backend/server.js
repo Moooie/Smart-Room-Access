@@ -616,11 +616,13 @@ app.post('/api/rooms/:kode/unlock', async (req, res) => {
 
   let actorName = 'System/API';
   let actorUserId = null;
+  let isAdminActor = false;
   let isAuthorized = false;
 
   // 1. Cek otentikasi via API Key
   if (req.get('x-api-key') === API_KEY) {
     isAuthorized = true;
+    isAdminActor = true;
     actorName = 'API Key Operator';
   } else {
     // 2. Cek otentikasi via JWT Bearer Token
@@ -635,6 +637,7 @@ app.post('/api/rooms/:kode/unlock', async (req, res) => {
         if (decoded.role === 'admin') {
           // Admin memiliki hak akses penuh membuka pintu kapan saja
           isAuthorized = true;
+          isAdminActor = true;
         } else {
           // Dosen / Mahasiswa HANYA boleh jika memiliki jadwal approved yang sedang aktif saat ini
           const [[roomData]] = await db.query('SELECT id_room FROM rooms WHERE kode_ruangan = ?', [kodeUpper]);
@@ -690,9 +693,14 @@ app.post('/api/rooms/:kode/unlock', async (req, res) => {
       await db.query("UPDATE rooms SET status_pintu = 'unlocked' WHERE kode_ruangan = ?", [kodeUpper]);
       console.log(`[REMOTE] Pintu ${kodeUpper} dibuka secara remote oleh ${actorName}`);
 
-      // Broadcast update status pintu dan jadwalkan relock 4 detik
-      broadcast('DOOR_STATUS', { room: kodeUpper, status: 'unlocked', duration: DOOR_UNLOCK_DURATION });
-      scheduleDoorRelock(kodeUpper);
+      // Broadcast update status pintu; jika bukan admin, jadwalkan relock otomatis
+      broadcast('DOOR_STATUS', { room: kodeUpper, status: 'unlocked', duration: isAdminActor ? 0 : DOOR_UNLOCK_DURATION });
+      if (!isAdminActor) {
+        scheduleDoorRelock(kodeUpper);
+      } else if (doorRelockTimers[kodeUpper]) {
+        clearTimeout(doorRelockTimers[kodeUpper]);
+        delete doorRelockTimers[kodeUpper];
+      }
 
       // Simpan log remote unlock ke access_logs jika ESP32 sedang offline atau belum publish
       const [[room]] = await db.query('SELECT id_room FROM rooms WHERE kode_ruangan = ?', [kodeUpper]);
@@ -707,12 +715,55 @@ app.post('/api/rooms/:kode/unlock', async (req, res) => {
       broadcastStats();
       res.json({
         ok: true,
-        message: `Pintu ${kodeUpper} berhasil dibuka selama ${DOOR_UNLOCK_DURATION / 1000} detik`,
-        duration: DOOR_UNLOCK_DURATION
+        message: isAdminActor
+          ? `Pintu ${kodeUpper} berhasil dibuka (tetap terbuka sampai dikunci oleh Admin)`
+          : `Pintu ${kodeUpper} berhasil dibuka selama ${DOOR_UNLOCK_DURATION / 1000} detik`,
+        duration: isAdminActor ? 0 : DOOR_UNLOCK_DURATION
       });
     } catch (dbErr) {
       console.error('[API] Error updating door unlock state in DB:', dbErr);
       res.json({ ok: true, note: 'Signal sent via MQTT' });
+    }
+  });
+});
+
+// POST /api/rooms/:kode/lock - Kunci pintu secara manual dari Dashboard (Admin Only)
+app.post('/api/rooms/:kode/lock', verifyToken, requireAdmin, async (req, res) => {
+  const kode = req.params.kode.toLowerCase();
+  const kodeUpper = kode.toUpperCase();
+
+  const [[targetRoom]] = await db.query('SELECT id_room, kode_ruangan FROM rooms WHERE UPPER(kode_ruangan) = ?', [kodeUpper]);
+  if (!targetRoom) {
+    return res.status(404).json({ error: 'room_not_found', message: 'Ruangan tidak dikenali' });
+  }
+
+  if (!mqttClient.connected) {
+    return res.status(503).json({
+      error: 'mqtt_down',
+      message: 'Broker MQTT sedang tidak terhubung. Perangkat ESP32 tidak dapat menerima perintah lock'
+    });
+  }
+
+  const topicCmd = `room/${kode}/command`;
+  mqttClient.publish(topicCmd, 'lock', { qos: 1 }, async (publishErr) => {
+    if (publishErr) {
+      console.error('[MQTT] Publish lock command failed:', publishErr);
+      return res.status(502).json({ error: 'publish_failed', message: 'Gagal mengirim sinyal lock ke broker MQTT' });
+    }
+
+    try {
+      if (doorRelockTimers[kodeUpper]) {
+        clearTimeout(doorRelockTimers[kodeUpper]);
+        delete doorRelockTimers[kodeUpper];
+      }
+      await db.query("UPDATE rooms SET status_pintu = 'locked' WHERE kode_ruangan = ?", [kodeUpper]);
+      console.log(`[REMOTE] Pintu ${kodeUpper} dikunci secara manual oleh ${req.user.nama_lengkap}`);
+      broadcast('DOOR_STATUS', { room: kodeUpper, status: 'locked' });
+      broadcastStats();
+      res.json({ ok: true, message: `Pintu ${kodeUpper} berhasil dikunci` });
+    } catch (dbErr) {
+      console.error('[API] Error updating door lock state in DB:', dbErr);
+      res.json({ ok: true, note: 'Lock signal sent via MQTT' });
     }
   });
 });

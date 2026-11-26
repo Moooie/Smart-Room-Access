@@ -21,7 +21,7 @@
 const char* WIFI_SSID    = "Sambilegi 21";
 const char* WIFI_PASS    = "maguwoharjo";
 
-const char* API_URL      = "http://192.168.0.133:3000/api/schedules";
+const char* API_URL      = "https://smart-room-access-production.up.railway.app/api/schedules";
 const char* API_KEY      = "KELOMPOKIOTEMAS";
 
 const char* MQTT_HOST    = "ua921aa1.ala.asia-southeast1.emqxsl.com";
@@ -162,7 +162,7 @@ bool fetchSchedule() {
 }
 
 // ---------- VALIDASI AKSES SESUAI JADWAL RUANGAN ----------
-ValidationResult validate(const String& uid, const char* targetRoom) {
+ValidationResult validate(const String& uid, const char* targetRoom, unsigned long* remainingMsOut = nullptr) {
   if (!timeValid()) return RES_NO_TIME;
   if (!cacheFresh()) return RES_NO_CACHE;
 
@@ -191,6 +191,19 @@ ValidationResult validate(const String& uid, const char* targetRoom) {
       hasActiveTime = true;
       // Periksa apakah ruangan sesuai dengan reader yang di-tap
       if (String((const char*)s["roomId"]).equalsIgnoreCase(targetRoom)) {
+        if (remainingMsOut != nullptr) {
+          struct tm ti;
+          if (getLocalTime(&ti, 100)) {
+            int nowSec = ti.tm_hour * 3600 + ti.tm_min * 60 + ti.tm_sec;
+            String endStr = String((const char*)s["end"]);
+            int endH = endStr.substring(0, 2).toInt();
+            int endM = endStr.substring(3, 5).toInt();
+            int endSec = endH * 3600 + endM * 60;
+            *remainingMsOut = (endSec > nowSec) ? (unsigned long)(endSec - nowSec) * 1000UL : OPEN_MS;
+          } else {
+            *remainingMsOut = OPEN_MS;
+          }
+        }
         return RES_OK;
       }
     }
@@ -201,22 +214,43 @@ ValidationResult validate(const String& uid, const char* targetRoom) {
 }
 
 // ---------- AKTUATOR SOLENOID PER RUANGAN ----------
-void openDoor(int roomNumber) {
+// durationMs = 0 berarti tetap terbuka sampai ada perintah 'lock'
+void openDoor(int roomNumber, unsigned long durationMs = OPEN_MS) {
+  unsigned long offAt = (durationMs == 0) ? 0 : (millis() + durationMs);
   if (roomNumber == 1) {
     digitalWrite(RELAY_1_PIN, RELAY_BUKA);
     relay1Open = true;
-    relay1OffAt = millis() + OPEN_MS;
-    Serial.println("-> Solenoid Ruang MERAH (Relay 1) TERBUKA 4 detik");
+    relay1OffAt = offAt;
+    Serial.printf("-> Solenoid Ruang MERAH (Relay 1) TERBUKA (%s)\n", durationMs == 0 ? "bebas/manual" : (String(durationMs / 1000) + "s").c_str());
   } else if (roomNumber == 2) {
     digitalWrite(RELAY_2_PIN, RELAY_BUKA);
     relay2Open = true;
-    relay2OffAt = millis() + OPEN_MS;
-    Serial.println("-> Solenoid Ruang KUNING (Relay 2) TERBUKA 4 detik");
+    relay2OffAt = offAt;
+    Serial.printf("-> Solenoid Ruang KUNING (Relay 2) TERBUKA (%s)\n", durationMs == 0 ? "bebas/manual" : (String(durationMs / 1000) + "s").c_str());
   } else if (roomNumber == 3) {
     digitalWrite(RELAY_3_PIN, RELAY_BUKA);
     relay3Open = true;
-    relay3OffAt = millis() + OPEN_MS;
-    Serial.println("-> Solenoid Ruang HIJAU (Relay 3) TERBUKA 4 detik");
+    relay3OffAt = offAt;
+    Serial.printf("-> Solenoid Ruang HIJAU (Relay 3) TERBUKA (%s)\n", durationMs == 0 ? "bebas/manual" : (String(durationMs / 1000) + "s").c_str());
+  }
+}
+
+void closeDoor(int roomNumber) {
+  if (roomNumber == 1) {
+    digitalWrite(RELAY_1_PIN, RELAY_KUNCI);
+    relay1Open = false;
+    relay1OffAt = 0;
+    Serial.println("-> Solenoid Ruang MERAH (Relay 1) DIKUNCI manual.");
+  } else if (roomNumber == 2) {
+    digitalWrite(RELAY_2_PIN, RELAY_KUNCI);
+    relay2Open = false;
+    relay2OffAt = 0;
+    Serial.println("-> Solenoid Ruang KUNING (Relay 2) DIKUNCI manual.");
+  } else if (roomNumber == 3) {
+    digitalWrite(RELAY_3_PIN, RELAY_KUNCI);
+    relay3Open = false;
+    relay3OffAt = 0;
+    Serial.println("-> Solenoid Ruang HIJAU (Relay 3) DIKUNCI manual.");
   }
 }
 
@@ -281,30 +315,34 @@ void mqttReconnect() {
   }
 }
 
-// Perintah Remote Unlock dari Web Dashboard Admin
+// Perintah Remote Unlock / Lock dari Web Dashboard Admin
 void onMqttMessage(char* topic, byte* payload, unsigned int len) {
   String m;
   for (unsigned int i = 0; i < len; i++) m += (char)payload[i];
   m.trim();
 
+  String t = String(topic);
+  int firstSlash = t.indexOf('/');
+  int secondSlash = t.indexOf('/', firstSlash + 1);
+  String r = "MERAH";
+  if (firstSlash >= 0 && secondSlash > firstSlash) {
+    r = t.substring(firstSlash + 1, secondSlash);
+    r.toUpperCase();
+  }
+
+  int rNum = 1;
+  if (r == "KUNING") rNum = 2;
+  else if (r == "HIJAU") rNum = 3;
+
   if (m == "unlock") {
-    String t = String(topic);
-    int firstSlash = t.indexOf('/');
-    int secondSlash = t.indexOf('/', firstSlash + 1);
-    String r = "MERAH";
-    if (firstSlash >= 0 && secondSlash > firstSlash) {
-      r = t.substring(firstSlash + 1, secondSlash);
-      r.toUpperCase();
-    }
-
-    int rNum = 1;
-    if (r == "KUNING") rNum = 2;
-    else if (r == "HIJAU") rNum = 3;
-
-    openDoor(rNum);
+    openDoor(rNum, 0); // Bebas terbuka sampai admin mengunci
     lcdShow("Remote Unlock", "Ruang " + r);
     msgUntil = millis() + 2500;
     publishLog(r.c_str(), "REMOTE", true, "REMOTE_UNLOCK", "remote");
+  } else if (m == "lock") {
+    closeDoor(rNum);
+    lcdShow("Remote Lock", "Ruang " + r);
+    msgUntil = millis() + 2500;
   }
 }
 
@@ -312,12 +350,13 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len) {
 void handleCard(int roomNumber, const char* roomCode, const String& uid) {
   Serial.printf("\n[RFID %d - %s] Kartu Terdeteksi! UID: %s\n", roomNumber, roomCode, uid.c_str());
   lcdShow(String("Tap: ") + roomCode, "Memvalidasi...");
-  ValidationResult r = validate(uid, roomCode);
+  unsigned long remainingMs = OPEN_MS;
+  ValidationResult r = validate(uid, roomCode, &remainingMs);
 
   switch (r) {
     case RES_OK: {
       lcdShow("Akses Diterima", String("Ruang ") + roomCode);
-      openDoor(roomNumber);
+      openDoor(roomNumber, remainingMs);
       publishLog(roomCode, uid, true, "OK", "rfid");
       break;
     }
@@ -417,18 +456,18 @@ void loop() {
   mqttReconnect();
   mqtt.loop();
 
-  // Penguncian Otomatis Non-Blocking (4 detik) per relay
-  if (relay1Open && millis() >= relay1OffAt) {
+  // Penguncian Otomatis Non-Blocking sesuai jadwal (jika relayOffAt > 0)
+  if (relay1Open && relay1OffAt > 0 && millis() >= relay1OffAt) {
     digitalWrite(RELAY_1_PIN, RELAY_KUNCI);
     relay1Open = false;
     Serial.println("-> Relay 1 (MERAH) terkunci kembali.");
   }
-  if (relay2Open && millis() >= relay2OffAt) {
+  if (relay2Open && relay2OffAt > 0 && millis() >= relay2OffAt) {
     digitalWrite(RELAY_2_PIN, RELAY_KUNCI);
     relay2Open = false;
     Serial.println("-> Relay 2 (KUNING) terkunci kembali.");
   }
-  if (relay3Open && millis() >= relay3OffAt) {
+  if (relay3Open && relay3OffAt > 0 && millis() >= relay3OffAt) {
     digitalWrite(RELAY_3_PIN, RELAY_KUNCI);
     relay3Open = false;
     Serial.println("-> Relay 3 (HIJAU) terkunci kembali.");
@@ -447,7 +486,7 @@ void loop() {
   }
 
   // Kembali ke tampilan standby
-  if (msgUntil && millis() >= msgUntil && !relay1Open && !relay2Open && !relay3Open) {
+  if (msgUntil && millis() >= msgUntil) {
     msgUntil = 0;
     showStandby();
   }

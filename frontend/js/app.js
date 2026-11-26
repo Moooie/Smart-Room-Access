@@ -606,6 +606,15 @@ function renderRooms() {
 
         <!-- Footer / Remote Action -->
         <div class="p-5 border-t border-slate-100 bg-white">
+          ${(r.status_pintu === 'unlocked' && currentUser && currentUser.role === 'admin') ? `
+          <button 
+            onclick="executeRemoteLock('${r.kode_ruangan}')" 
+            id="btnLock-${r.kode_ruangan}"
+            class="w-full py-2.5 px-4 text-xs font-bold text-white rounded-xl shadow-md transition flex items-center justify-center space-x-2 bg-slate-800 hover:bg-slate-900">
+            <i class="fa-solid fa-lock"></i>
+            <span>Kunci Pintu (Remote Lock)</span>
+          </button>
+          ` : `
           <button 
             onclick="confirmUnlockRoom('${r.kode_ruangan}', '${r.nama_ruangan}')" 
             ${!canUnlock ? 'disabled' : ''}
@@ -615,6 +624,7 @@ function renderRooms() {
             <i class="fa-solid fa-lock-open"></i>
             <span>Buka Pintu (Remote Unlock)</span>
           </button>
+          `}
           <div class="text-[11px] text-center text-slate-400 mt-2">
             ${unlockTooltip}
           </div>
@@ -698,12 +708,19 @@ async function executeRemoteUnlock() {
       method: 'POST'
     });
 
+    if (res.duration === 0) {
+      closeUnlockModal();
+      showToast(res.message || `Pintu ${kode} terbuka (tetap terbuka sampai dikunci Admin)`, 'success');
+      loadRoomsData();
+      return;
+    }
+
     // Sembunyikan tombol aksi modal dan mulai animasi countdown
     document.getElementById('unlockModalActions').classList.add('hidden');
     const countdownBox = document.getElementById('countdownBox');
     countdownBox.classList.remove('hidden');
 
-    let timeLeft = 4;
+    let timeLeft = Math.ceil((res.duration || 4000) / 1000);
     const countSecondsEl = document.getElementById('countdownSeconds');
     countSecondsEl.textContent = `${timeLeft}s`;
 
@@ -723,6 +740,16 @@ async function executeRemoteUnlock() {
     btn.disabled = false;
     btn.innerHTML = 'Ya, Buka Pintu';
     closeUnlockModal();
+  }
+}
+
+async function executeRemoteLock(kode) {
+  try {
+    const res = await apiFetch(`/api/rooms/${kode}/lock`, { method: 'POST' });
+    showToast(res.message || `Pintu ${kode} berhasil dikunci`, 'success');
+    loadRoomsData();
+  } catch (err) {
+    showToast(err.message, 'error');
   }
 }
 
