@@ -34,6 +34,7 @@ const DB_CONFIG = {
   connectionLimit: 15,
   queueLimit: 0,
   dateStrings: true, // Pastikan tipe DATE dan TIME dikembalikan sebagai string
+  timezone: '+07:00',
   ssl: (process.env.DB_SSL === 'true' || (process.env.DB_HOST && process.env.DB_HOST !== 'localhost' && process.env.DB_HOST !== '127.0.0.1'))
     ? { rejectUnauthorized: false }
     : undefined,
@@ -45,6 +46,11 @@ const MQTT_PASS = process.env.MQTT_PASS || 'iotbackend';
 
 // Inisialisasi Database Pool
 const db = mysql.createPool(DB_CONFIG);
+
+// Pastikan setiap koneksi MySQL menggunakan zona waktu WIB (+07:00)
+db.on('connection', (conn) => {
+  conn.query("SET time_zone = '+07:00'");
+});
 
 // Tes koneksi database di awal
 (async () => {
