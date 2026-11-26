@@ -1,7 +1,7 @@
 # Smart Scheduled Room Access System
 ### Full-Stack IoT Application (Layer 3: API/Gateway & Layer 4: Application Layer)
 
-Sistem Pengendalian Akses Ruangan Terjadwal berbasis IoT menggunakan mikrokontroler **NodeMCU ESP32**, modul RFID **MFRC522**, LiquidCrystal I2C, Solenoid Door Lock, protokol **MQTT**, **REST API Express**, database **MySQL**, dan antarmuka **Web Dashboard Real-Time** (WebSocket + Tailwind CSS).
+Sistem Pengendalian Akses Ruangan Terjadwal berbasis IoT menggunakan mikrokontroler **NodeMCU ESP32**, modul RFID **MFRC522**, LiquidCrystal I2C, Solenoid Door Lock, protokol **MQTT**, **REST API Express**, database **MySQL**, dan antarmuka **Web Dashboard Real-Time** (WebSocket + Tailwind CSS)
 
 ---
 
