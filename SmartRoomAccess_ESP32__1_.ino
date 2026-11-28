@@ -143,34 +143,33 @@ bool cacheFresh() {
   return saved > 0 && (now - saved) < CACHE_TTL_SEC;
 }
 
-// Ambil gabungan jadwal + daftar pemilik kartu dalam 1x HTTPS request (hemat RAM & stabilkan MQTT)
+// Ambil gabungan jadwal + daftar pemilik kartu dalam 1x HTTPS request
+// Lepas TLS MQTT sesaat agar RAM heap lega & HTTPS langsung sukses tanpa retry, lalu sambung ulang MQTT
 bool fetchAllData() {
   if (WiFi.status() != WL_CONNECTED) return false;
 
-  auto doHttpGet = [](String& outBody) -> int {
-    WiFiClientSecure syncClient;
-    syncClient.setInsecure();
-    HTTPClient http;
-    http.begin(syncClient, API_SYNC);
-    http.addHeader("x-api-key", API_KEY);
-    http.setConnectTimeout(3000);
-    http.setTimeout(3500);
-    int c = http.GET();
-    if (c == 200) outBody = http.getString();
-    http.end();
-    return c;
-  };
-
-  String body;
-  int code = doHttpGet(body);
-  // Jika gagal karena RAM TLS sedang dipakai MQTT, lepas MQTT sesaat lalu coba lagi
-  if (code != 200 && mqtt.connected()) {
-    Serial.printf("[HTTP] Sync coba-1 gagal (%d), melepas TLS MQTT sesaat untuk retry...\n", code);
+  bool wasMqttConnected = mqtt.connected();
+  if (wasMqttConnected) {
     mqtt.disconnect();
-    delay(80);
-    code = doHttpGet(body);
-    lastMqttTry = 0; // langsung reconnect MQTT di loop berikutnya
+    delay(50);
   }
+
+  WiFiClientSecure syncClient;
+  syncClient.setInsecure();
+  HTTPClient http;
+  http.begin(syncClient, API_SYNC);
+  http.addHeader("x-api-key", API_KEY);
+  http.setConnectTimeout(3000);
+  http.setTimeout(3500);
+  int code = http.GET();
+  String body;
+  if (code == 200) body = http.getString();
+  http.end();
+
+  if (wasMqttConnected) {
+    lastMqttTry = 0; // langsung reconnect MQTT segera setelah HTTPS selesai
+  }
+
   if (code != 200) {
     Serial.printf("[HTTP] Sync gagal, kode: %d\n", code);
     return false;
@@ -450,16 +449,6 @@ void handleCard(int roomNumber, const char* roomCode, const String& uid) {
   String ownerName = "";
   String endTimeStr = "";
   ValidationResult r = validate(uid, roomCode, &remainingMs, &ownerName, &endTimeStr);
-
-  // Jika belum ada di cache lokal (kartu baru didaftarkan / jadwal baru di-ACC), langsung sync cepat sekali!
-  if ((r == RES_NO_UID || r == RES_NO_SCHEDULE) && WiFi.status() == WL_CONNECTED && (millis() - lastFetch > 5000)) {
-    lcdShow("Cek Data Baru...", "Mohon Tunggu");
-    if (fetchAllData()) {
-      ownerName = "";
-      endTimeStr = "";
-      r = validate(uid, roomCode, &remainingMs, &ownerName, &endTimeStr);
-    }
-  }
 
   String displayName = ownerName.length() > 0 ? ownerName : uid;
 
