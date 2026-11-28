@@ -456,6 +456,7 @@ app.post('/api/auth/register', async (req, res) => {
       rfid_uid: cleanUid,
     };
 
+    if (cleanUid) notifyEspSync('user_registered');
     const token = generateToken(newUser);
     res.status(201).json({
       message: 'Pendaftaran akun berhasil',
@@ -530,9 +531,19 @@ app.get('/api/schedules', async (req, res) => {
 // Helper: Beri tahu ESP32 via MQTT agar segera sinkronisasi jadwal & kartu terbaru
 function notifyEspSync(reason = 'update') {
   if (mqttClient && mqttClient.connected) {
-    mqttClient.publish('room/sync', reason, { qos: 0 });
+    mqttClient.publish('room/sync', reason, { qos: 1 });
+    console.log(`[MQTT] Mengirim sinyal room/sync (${reason}) ke ESP32`);
   }
 }
+
+// POST /api/esp/sync - Trigger sinkronisasi manual ke ESP32 dari Dashboard (Admin Only)
+app.post('/api/esp/sync', verifyToken, requireAdmin, (req, res) => {
+  if (!mqttClient || !mqttClient.connected) {
+    return res.status(503).json({ error: 'mqtt_down', message: 'Broker MQTT sedang tidak terhubung' });
+  }
+  notifyEspSync('manual_admin');
+  res.json({ ok: true, message: 'Perintah sinkronisasi data kartu & jadwal dikirim ke ESP32!' });
+});
 
 // GET /api/cards - Daftar kartu RFID terdaftar beserta nama pemiliknya untuk tampilan LCD ESP32
 app.get('/api/cards', async (req, res) => {

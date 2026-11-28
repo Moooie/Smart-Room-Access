@@ -177,10 +177,16 @@
           <h1 class="text-lg sm:text-xl font-bold text-slate-900">Status & Kontrol Ruangan Real-Time</h1>
           <p class="text-xs sm:text-sm text-slate-500">Pemantauan status perangkat NodeMCU ESP32, kondisi solenoid door lock, dan jadwal aktif saat ini.</p>
         </div>
-        <button onclick="loadRoomsData()" class="self-start sm:self-auto shrink-0 whitespace-nowrap px-3 py-1.5 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-sm flex items-center space-x-1.5 transition">
-          <i class="fa-solid fa-rotate"></i>
-          <span>Muat Ulang</span>
-        </button>
+        <div class="flex items-center space-x-2 self-start sm:self-auto shrink-0">
+          <button onclick="triggerEspSync()" id="btnSyncEsp" class="hidden whitespace-nowrap px-3 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg shadow-sm flex items-center space-x-1.5 transition" title="Sinkronkan daftar kartu RFID & jadwal terbaru ke ESP32 sekarang">
+            <i class="fa-solid fa-cloud-arrow-down"></i>
+            <span>Sync ESP32</span>
+          </button>
+          <button onclick="loadRoomsData()" class="whitespace-nowrap px-3 py-1.5 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-sm flex items-center space-x-1.5 transition">
+            <i class="fa-solid fa-rotate"></i>
+            <span>Muat Ulang</span>
+          </button>
+        </div>
       </div>
 
       <!-- 3 Room Cards Grid (Merah, Kuning, Hijau) -->

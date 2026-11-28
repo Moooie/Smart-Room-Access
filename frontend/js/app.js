@@ -247,6 +247,7 @@ function updateAuthUI(user) {
   const adminBadgeTag = document.getElementById('adminBadgeTag');
   const navUsers = document.getElementById('nav-users');
   const mobileNavUsers = document.getElementById('mobileNavUsers');
+  const btnSyncEsp = document.getElementById('btnSyncEsp');
 
   if (user) {
     unauth.classList.add('hidden');
@@ -270,11 +271,13 @@ function updateAuthUI(user) {
       if (adminBadgeTag) adminBadgeTag.classList.remove('hidden');
       if (navUsers) navUsers.classList.remove('hidden');
       if (mobileNavUsers) mobileNavUsers.classList.remove('hidden');
+      if (btnSyncEsp) btnSyncEsp.classList.remove('hidden');
     } else {
       if (adminBadgeTag) adminBadgeTag.classList.add('hidden');
       // Sembunyikan tab pengguna untuk non-admin
       if (navUsers) navUsers.classList.add('hidden');
       if (mobileNavUsers) mobileNavUsers.classList.add('hidden');
+      if (btnSyncEsp) btnSyncEsp.classList.add('hidden');
     }
   } else {
     unauth.classList.remove('hidden');
@@ -282,6 +285,7 @@ function updateAuthUI(user) {
     if (adminBadgeTag) adminBadgeTag.classList.add('hidden');
     if (navUsers) navUsers.classList.add('hidden');
     if (mobileNavUsers) mobileNavUsers.classList.add('hidden');
+    if (btnSyncEsp) btnSyncEsp.classList.add('hidden');
   }
 
   // Render ulang kartu ruangan untuk memperbarui status izin remote unlock
@@ -756,6 +760,27 @@ async function executeRemoteLock(kode) {
     loadRoomsData();
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+async function triggerEspSync() {
+  const btn = document.getElementById('btnSyncEsp');
+  const origHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i><span>Menyinkronkan...</span>';
+  }
+  try {
+    const res = await apiFetch('/api/esp/sync', { method: 'POST' });
+    showToast(res.message || 'Sinkronisasi ESP32 dikirim!', 'success');
+    loadRoomsData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
   }
 }
 
