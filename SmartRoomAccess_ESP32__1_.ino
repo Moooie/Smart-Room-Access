@@ -293,9 +293,9 @@ void recoverPeripherals(bool reinitLcd = false) {
   digitalWrite(SS_1_PIN, HIGH);
   digitalWrite(SS_2_PIN, HIGH);
   digitalWrite(SS_3_PIN, HIGH);
-  rfid1.PCD_Init(); delay(10);
-  rfid2.PCD_Init(); delay(10);
-  rfid3.PCD_Init(); delay(10);
+  rfid1.PCD_Init(); rfid1.PCD_AntennaOff(); delay(10);
+  rfid2.PCD_Init(); rfid2.PCD_AntennaOff(); delay(10);
+  rfid3.PCD_Init(); rfid3.PCD_AntennaOff(); delay(10);
 }
 
 // ---------- AKTUATOR SOLENOID PER RUANGAN ----------
@@ -520,15 +520,15 @@ void setup() {
   lcd.backlight();
   lcdShow("Smart Room Acces", "Init 3 RFID...");
 
-  // 4. Inisialisasi Bus SPI & Ketiga Reader RFID
+  // 4. Inisialisasi Bus SPI & Ketiga Reader RFID (matikan antena dulu agar bergantian & hemat daya 3.3V)
   SPI.begin(18, 19, 23);
-  rfid1.PCD_Init(); delay(50);
-  rfid2.PCD_Init(); delay(50);
-  rfid3.PCD_Init(); delay(50);
+  rfid1.PCD_Init(); rfid1.PCD_AntennaOff(); delay(50);
+  rfid2.PCD_Init(); rfid2.PCD_AntennaOff(); delay(50);
+  rfid3.PCD_Init(); rfid3.PCD_AntennaOff(); delay(50);
 
-  Serial.printf("[RFID 1] Version: 0x%02X\n", rfid1.PCD_ReadRegister(MFRC522::VersionReg));
-  Serial.printf("[RFID 2] Version: 0x%02X\n", rfid2.PCD_ReadRegister(MFRC522::VersionReg));
-  Serial.printf("[RFID 3] Version: 0x%02X\n", rfid3.PCD_ReadRegister(MFRC522::VersionReg));
+  Serial.printf("[RFID 1 - MERAH ] Version: 0x%02X\n", rfid1.PCD_ReadRegister(MFRC522::VersionReg));
+  Serial.printf("[RFID 2 - KUNING] Version: 0x%02X\n", rfid2.PCD_ReadRegister(MFRC522::VersionReg));
+  Serial.printf("[RFID 3 - HIJAU ] Version: 0x%02X\n", rfid3.PCD_ReadRegister(MFRC522::VersionReg));
 
   SPIFFS.begin(true);
 
@@ -617,17 +617,19 @@ void loop() {
   // Jaga kesehatan 3 reader MFRC522 tiap 10 detik (auto-recover jika bus SPI hang/noise)
   if (!msgUntil && millis() - lastRfidCheck >= 10000) {
     lastRfidCheck = millis();
-    auto recoverRfid = [](MFRC522& r, byte ss1, byte ss2) {
+    auto recoverRfid = [](MFRC522& r, const char* label, byte ss1, byte ss2) {
       digitalWrite(ss1, HIGH);
       digitalWrite(ss2, HIGH);
       byte v = r.PCD_ReadRegister(MFRC522::VersionReg);
       if (v == 0x00 || v == 0xFF) {
+        Serial.printf("[RFID %s] Hang/Tidak terbaca (0x%02X), re-init...\n", label, v);
         r.PCD_Init();
+        r.PCD_AntennaOff();
       }
     };
-    recoverRfid(rfid1, SS_2_PIN, SS_3_PIN);
-    recoverRfid(rfid2, SS_1_PIN, SS_3_PIN);
-    recoverRfid(rfid3, SS_1_PIN, SS_2_PIN);
+    recoverRfid(rfid1, "MERAH", SS_2_PIN, SS_3_PIN);
+    recoverRfid(rfid2, "KUNING", SS_1_PIN, SS_3_PIN);
+    recoverRfid(rfid3, "HIJAU", SS_1_PIN, SS_2_PIN);
   }
 
   // Kembali ke tampilan standby
@@ -636,40 +638,34 @@ void loop() {
     showStandby();
   }
 
-  // Deteksi Tap RFID pada masing-masing reader
+  // Deteksi Tap RFID bergantian (1 antena menyala dalam 1 waktu: bebas interferensi & hemat 3.3V!)
   if (!msgUntil) {
-    // ---- 1. Cek RFID 1 (Ruang Merah) ----
-    digitalWrite(SS_2_PIN, HIGH);
-    digitalWrite(SS_3_PIN, HIGH);
-    if (rfid1.PICC_IsNewCardPresent() && rfid1.PICC_ReadCardSerial()) {
-      String uid1 = readUid(rfid1);
-      handleCard(1, "MERAH", uid1);
-      rfid1.PICC_HaltA();
-      rfid1.PCD_StopCrypto1();
-    }
-    digitalWrite(SS_1_PIN, HIGH);
+    auto pollReader = [](MFRC522& r, int roomNum, const char* roomCode, byte ssSelf, byte ssOther1, byte ssOther2) -> bool {
+      digitalWrite(ssOther1, HIGH);
+      digitalWrite(ssOther2, HIGH);
+      r.PCD_AntennaOn();
+      delay(8);
+      bool hit = false;
+      if (r.PICC_IsNewCardPresent() && r.PICC_ReadCardSerial()) {
+        String uid = readUid(r);
+        r.PICC_HaltA();
+        r.PCD_StopCrypto1();
+        r.PCD_AntennaOff();
+        digitalWrite(ssSelf, HIGH);
+        handleCard(roomNum, roomCode, uid);
+        hit = true;
+      } else {
+        r.PCD_AntennaOff();
+        digitalWrite(ssSelf, HIGH);
+      }
+      return hit;
+    };
 
-    // ---- 2. Cek RFID 2 (Ruang Kuning) ----
-    digitalWrite(SS_1_PIN, HIGH);
-    digitalWrite(SS_3_PIN, HIGH);
-    if (rfid2.PICC_IsNewCardPresent() && rfid2.PICC_ReadCardSerial()) {
-      String uid2 = readUid(rfid2);
-      handleCard(2, "KUNING", uid2);
-      rfid2.PICC_HaltA();
-      rfid2.PCD_StopCrypto1();
+    if (!pollReader(rfid1, 1, "MERAH", SS_1_PIN, SS_2_PIN, SS_3_PIN)) {
+      if (!pollReader(rfid2, 2, "KUNING", SS_2_PIN, SS_1_PIN, SS_3_PIN)) {
+        pollReader(rfid3, 3, "HIJAU", SS_3_PIN, SS_1_PIN, SS_2_PIN);
+      }
     }
-    digitalWrite(SS_2_PIN, HIGH);
-
-    // ---- 3. Cek RFID 3 (Ruang Hijau) ----
-    digitalWrite(SS_1_PIN, HIGH);
-    digitalWrite(SS_2_PIN, HIGH);
-    if (rfid3.PICC_IsNewCardPresent() && rfid3.PICC_ReadCardSerial()) {
-      String uid3 = readUid(rfid3);
-      handleCard(3, "HIJAU", uid3);
-      rfid3.PICC_HaltA();
-      rfid3.PCD_StopCrypto1();
-    }
-    digitalWrite(SS_3_PIN, HIGH);
   }
   delay(20); // Beri jeda agar bus SPI MFRC522 tidak overload/hang
 }
