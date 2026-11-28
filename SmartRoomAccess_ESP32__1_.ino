@@ -18,8 +18,8 @@
 // ==========================================
 // KONFIGURASI WI-FI & SERVER
 // ==========================================
-const char* WIFI_SSID    = "Cihuy";
-const char* WIFI_PASS    = "ambatu1234";
+const char* WIFI_SSID    = "Sambilegi 21";
+const char* WIFI_PASS    = "maguwoharjo";
 
 const char* API_URL      = "https://smart-room-access-production.up.railway.app/api/schedules";
 const char* API_KEY      = "KELOMPOKIOTEMAS";
@@ -213,6 +213,20 @@ ValidationResult validate(const String& uid, const char* targetRoom, unsigned lo
   return uidFound ? RES_NO_SCHEDULE : RES_NO_UID;
 }
 
+// ---------- PEMULIHAN LCD & 3 RFID DARI NOISE RELAY/SOLENOID ----------
+void recoverPeripherals(bool reinitLcd = false) {
+  if (reinitLcd) {
+    lcd.init();
+    lcd.backlight();
+  }
+  digitalWrite(SS_1_PIN, HIGH);
+  digitalWrite(SS_2_PIN, HIGH);
+  digitalWrite(SS_3_PIN, HIGH);
+  rfid1.PCD_Init(); delay(10);
+  rfid2.PCD_Init(); delay(10);
+  rfid3.PCD_Init(); delay(10);
+}
+
 // ---------- AKTUATOR SOLENOID PER RUANGAN ----------
 // durationMs = 0 berarti tetap terbuka sampai ada perintah 'lock'
 void openDoor(int roomNumber, unsigned long durationMs = OPEN_MS) {
@@ -233,6 +247,8 @@ void openDoor(int roomNumber, unsigned long durationMs = OPEN_MS) {
     relay3OffAt = offAt;
     Serial.printf("-> Solenoid Ruang HIJAU (Relay 3) TERBUKA (%s)\n", durationMs == 0 ? "bebas/manual" : (String(durationMs / 1000) + "s").c_str());
   }
+  delay(80);
+  recoverPeripherals(true);
 }
 
 void closeDoor(int roomNumber) {
@@ -252,6 +268,8 @@ void closeDoor(int roomNumber) {
     relay3OffAt = 0;
     Serial.println("-> Solenoid Ruang HIJAU (Relay 3) DIKUNCI manual.");
   }
+  delay(80);
+  recoverPeripherals(true);
 }
 
 // ---------- MQTT PUBLISH LOG & RECONNECT ----------
@@ -338,11 +356,12 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len) {
     openDoor(rNum, 0); // Bebas terbuka sampai admin mengunci
     lcdShow("Remote Unlock", "Ruang " + r);
     msgUntil = millis() + 2500;
-    publishLog(r.c_str(), "REMOTE", true, "REMOTE_UNLOCK", "remote");
+    Serial.printf("[RELAY STATE] M=%d K=%d H=%d\n", relay1Open, relay2Open, relay3Open);
   } else if (m == "lock") {
     closeDoor(rNum);
     lcdShow("Remote Lock", "Ruang " + r);
     msgUntil = millis() + 2500;
+    Serial.printf("[RELAY STATE] M=%d K=%d H=%d\n", relay1Open, relay2Open, relay3Open);
   }
 }
 
@@ -400,6 +419,7 @@ String readUid(MFRC522& reader) {
 // ==========================================
 void setup() {
   Serial.begin(115200);
+  Serial.println("\n[BOOT] ESP32 Smart Room Access START");
 
   // 1. Inisialisasi Ketiga Pin Relay Solenoid (terkunci di awal)
   pinMode(RELAY_1_PIN, OUTPUT); digitalWrite(RELAY_1_PIN, RELAY_KUNCI);
@@ -413,15 +433,20 @@ void setup() {
 
   // 3. Inisialisasi LCD 16x2 I2C
   Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setTimeOut(50);
   lcd.init();
   lcd.backlight();
   lcdShow("Smart Room Acces", "Init 3 RFID...");
 
   // 4. Inisialisasi Bus SPI & Ketiga Reader RFID
   SPI.begin(18, 19, 23);
-  rfid1.PCD_Init(); delay(30);
-  rfid2.PCD_Init(); delay(30);
-  rfid3.PCD_Init(); delay(30);
+  rfid1.PCD_Init(); delay(50);
+  rfid2.PCD_Init(); delay(50);
+  rfid3.PCD_Init(); delay(50);
+
+  Serial.printf("[RFID 1] Version: 0x%02X\n", rfid1.PCD_ReadRegister(MFRC522::VersionReg));
+  Serial.printf("[RFID 2] Version: 0x%02X\n", rfid2.PCD_ReadRegister(MFRC522::VersionReg));
+  Serial.printf("[RFID 3] Version: 0x%02X\n", rfid3.PCD_ReadRegister(MFRC522::VersionReg));
 
   SPIFFS.begin(true);
 
@@ -462,16 +487,28 @@ void loop() {
     digitalWrite(RELAY_1_PIN, RELAY_KUNCI);
     relay1Open = false;
     Serial.println("-> Relay 1 (MERAH) terkunci kembali.");
+    if (mqtt.connected()) mqtt.publish("room/merah/door-state", "locked");
+    delay(80);
+    recoverPeripherals(true);
+    if (!msgUntil) showStandby();
   }
   if (relay2Open && relay2OffAt > 0 && millis() >= relay2OffAt) {
     digitalWrite(RELAY_2_PIN, RELAY_KUNCI);
     relay2Open = false;
     Serial.println("-> Relay 2 (KUNING) terkunci kembali.");
+    if (mqtt.connected()) mqtt.publish("room/kuning/door-state", "locked");
+    delay(80);
+    recoverPeripherals(true);
+    if (!msgUntil) showStandby();
   }
   if (relay3Open && relay3OffAt > 0 && millis() >= relay3OffAt) {
     digitalWrite(RELAY_3_PIN, RELAY_KUNCI);
     relay3Open = false;
     Serial.println("-> Relay 3 (HIJAU) terkunci kembali.");
+    if (mqtt.connected()) mqtt.publish("room/hijau/door-state", "locked");
+    delay(80);
+    recoverPeripherals(true);
+    if (!msgUntil) showStandby();
   }
 
   // Kirim log tertunda saat offline
@@ -519,6 +556,7 @@ void loop() {
       rfid1.PICC_HaltA();
       rfid1.PCD_StopCrypto1();
     }
+    digitalWrite(SS_1_PIN, HIGH);
 
     // ---- 2. Cek RFID 2 (Ruang Kuning) ----
     digitalWrite(SS_1_PIN, HIGH);
@@ -529,6 +567,7 @@ void loop() {
       rfid2.PICC_HaltA();
       rfid2.PCD_StopCrypto1();
     }
+    digitalWrite(SS_2_PIN, HIGH);
 
     // ---- 3. Cek RFID 3 (Ruang Hijau) ----
     digitalWrite(SS_1_PIN, HIGH);
@@ -539,6 +578,7 @@ void loop() {
       rfid3.PICC_HaltA();
       rfid3.PCD_StopCrypto1();
     }
+    digitalWrite(SS_3_PIN, HIGH);
   }
   delay(20); // Beri jeda agar bus SPI MFRC522 tidak overload/hang
 }

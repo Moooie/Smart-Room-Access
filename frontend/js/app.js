@@ -138,10 +138,14 @@ function handleWsMessage({ type, data }) {
       break;
 
     case 'DOOR_STATUS':
-      // Update status pintu locked/unlocked
+      // Update status pintu locked/unlocked + refresh tombol aksi per ruangan
       updateRoomDoorStatus(data.room, data.status, data.duration);
+      loadRoomsData();
       if (data.status === 'unlocked') {
-        showToast(`🔓 Pintu Ruang ${data.room} TERBUKA (4 detik)`, 'success');
+        const durText = data.duration === 0
+          ? 'Mode Bebas Admin'
+          : (data.duration > 60000 ? 'Sesuai Jadwal Aktif' : `${Math.ceil((data.duration || 4000) / 1000)} detik`);
+        showToast(`🔓 Pintu Ruang ${data.room} TERBUKA (${durText})`, 'success');
       } else {
         showToast(`🔒 Pintu Ruang ${data.room} TERKUNCI kembali`, 'info');
       }
@@ -668,7 +672,9 @@ function confirmUnlockRoom(kode, nama) {
 
   pendingUnlockRoomCode = kode;
   document.getElementById('unlockModalTitle').textContent = `Buka Pintu ${nama}`;
-  document.getElementById('unlockModalDesc').textContent = `Apakah Anda yakin ingin mengirim sinyal MQTT unlock ke perangkat esp32-${kode.toLowerCase()} selama 4 detik?`;
+  document.getElementById('unlockModalDesc').textContent = (currentUser && currentUser.role === 'admin')
+    ? `Apakah Anda yakin ingin membuka pintu ${nama}? Pintu akan tetap terbuka sampai Anda menguncinya kembali.`
+    : `Apakah Anda yakin ingin mengirim sinyal MQTT unlock ke perangkat esp32-${kode.toLowerCase()}?`;
 
   // Reset tombol konfirmasi agar selalu siap diklik
   const btn = document.getElementById('btnConfirmUnlock');

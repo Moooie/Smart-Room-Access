@@ -122,7 +122,7 @@ function broadcast(type, payload) {
 // Timer penutup pintu otomatis untuk tiap ruangan (debounce/clear timeout lama)
 const doorRelockTimers = {};
 
-function scheduleDoorRelock(kodeRuangan) {
+function scheduleDoorRelock(kodeRuangan, durationMs = DOOR_UNLOCK_DURATION) {
   const kode = kodeRuangan.toUpperCase();
   if (doorRelockTimers[kode]) {
     clearTimeout(doorRelockTimers[kode]);
@@ -131,7 +131,7 @@ function scheduleDoorRelock(kodeRuangan) {
   doorRelockTimers[kode] = setTimeout(async () => {
     try {
       await db.query("UPDATE rooms SET status_pintu = 'locked' WHERE kode_ruangan = ?", [kode]);
-      console.log(`[DOOR] Ruang ${kode} otomatis terkunci kembali (${DOOR_UNLOCK_DURATION}ms)`);
+      console.log(`[DOOR] Ruang ${kode} otomatis terkunci kembali (${durationMs}ms)`);
       broadcast('DOOR_STATUS', { room: kode, status: 'locked' });
       broadcastStats();
     } catch (err) {
@@ -139,7 +139,7 @@ function scheduleDoorRelock(kodeRuangan) {
     } finally {
       delete doorRelockTimers[kode];
     }
-  }, DOOR_UNLOCK_DURATION);
+  }, durationMs);
 }
 
 // ==========================================================
@@ -155,9 +155,9 @@ const mqttClient = mqtt.connect(MQTT_BROKER, {
 
 mqttClient.on('connect', () => {
   console.log(`[MQTT] Terhubung ke broker MQTT di ${MQTT_BROKER}`);
-  mqttClient.subscribe(['room/+/status', 'room/+/access-log'], (err) => {
+  mqttClient.subscribe(['room/+/status', 'room/+/access-log', 'room/+/door-state'], (err) => {
     if (err) console.error('[MQTT] Gagal subscribe topik:', err);
-    else console.log('[MQTT] Berhasil subscribe ke topik room/+/status dan room/+/access-log');
+    else console.log('[MQTT] Berhasil subscribe ke topik room/+/status, room/+/access-log, dan room/+/door-state');
   });
 });
 
@@ -185,12 +185,27 @@ mqttClient.on('message', async (topic, payload) => {
 
       broadcast('DEVICE_STATUS', { room: kode, status: deviceStatus });
       broadcastStats();
+    } else if (kind === 'door-state') {
+      const doorState = rawMsg.trim() === 'unlocked' ? 'unlocked' : 'locked';
+      if (doorState === 'locked' && doorRelockTimers[kode]) {
+        clearTimeout(doorRelockTimers[kode]);
+        delete doorRelockTimers[kode];
+      }
+      await db.query('UPDATE rooms SET status_pintu = ? WHERE kode_ruangan = ?', [doorState, kode]);
+      console.log(`[MQTT] Status pintu fisik ${kode}: ${doorState}`);
+      broadcast('DOOR_STATUS', { room: kode, status: doorState, duration: 0 });
+      broadcastStats();
     } else if (kind === 'access-log') {
       let d;
       try {
         d = JSON.parse(rawMsg);
       } catch (pe) {
         console.error('[MQTT] Format JSON access-log tidak valid:', rawMsg);
+        return;
+      }
+
+      // Abaikan echo remote access-log dari ESP32 karena POST /unlock sudah menangani status & log
+      if (d.method === 'remote' || d.uid === 'REMOTE') {
         return;
       }
 
@@ -206,18 +221,25 @@ mqttClient.on('message', async (topic, payload) => {
         [d.uid]
       );
 
-      // Cari jadwal aktif jika ada
+      // Cari jadwal aktif jika ada (termasuk jam_selesai untuk durasi buka pintu)
       let activeScheduleId = null;
+      let remainingMs = DOOR_UNLOCK_DURATION;
       if (user) {
         const [[sched]] = await db.query(
-          `SELECT id_schedule FROM schedules 
+          `SELECT id_schedule, TIME_TO_SEC(TIMEDIFF(jam_selesai, CURTIME())) AS remaining_sec
+             FROM schedules 
             WHERE id_user = ? AND id_room = ? AND status_jadwal = 'approved'
               AND tanggal_akses = CURDATE()
               AND CURTIME() BETWEEN jam_mulai AND jam_selesai
             LIMIT 1`,
           [user.id_user, room.id_room]
         );
-        if (sched) activeScheduleId = sched.id_schedule;
+        if (sched) {
+          activeScheduleId = sched.id_schedule;
+          if (sched.remaining_sec && sched.remaining_sec > 0) {
+            remainingMs = sched.remaining_sec * 1000;
+          }
+        }
       }
 
       const ts = d.ts && d.ts.length >= 19 ? d.ts.slice(0, 19) : new Date().toISOString().slice(0, 19).replace('T', ' ');
@@ -233,11 +255,11 @@ mqttClient.on('message', async (topic, payload) => {
 
       console.log(`[MQTT] Log Akses ${kode} | UID: ${d.uid} | Status: ${statusAkses} (${keterangan})`);
 
-      // Jika akses diterima, perbarui status pintu dan picu timer penguncian otomatis
+      // Jika akses RFID diterima, pintu tetap terbuka sampai jadwal selesai
       if (statusAkses === 'granted') {
         await db.query("UPDATE rooms SET status_pintu = 'unlocked' WHERE id_room = ?", [room.id_room]);
-        broadcast('DOOR_STATUS', { room: kode, status: 'unlocked', duration: DOOR_UNLOCK_DURATION });
-        scheduleDoorRelock(kode);
+        broadcast('DOOR_STATUS', { room: kode, status: 'unlocked', duration: remainingMs });
+        scheduleDoorRelock(kode, remainingMs);
       }
 
       // Broadcast log baru ke UI dashboard
@@ -702,14 +724,28 @@ app.post('/api/rooms/:kode/unlock', async (req, res) => {
         delete doorRelockTimers[kodeUpper];
       }
 
-      // Simpan log remote unlock ke access_logs jika ESP32 sedang offline atau belum publish
-      const [[room]] = await db.query('SELECT id_room FROM rooms WHERE kode_ruangan = ?', [kodeUpper]);
+      // Simpan log remote unlock ke access_logs & broadcast ke live feed
+      const [[room]] = await db.query('SELECT id_room, nama_ruangan FROM rooms WHERE kode_ruangan = ?', [kodeUpper]);
       if (room) {
-        await db.query(
+        const [resInsert] = await db.query(
           `INSERT INTO access_logs (id_room, id_user, rfid_uid_tap, waktu_tap, metode_akses, status_akses, keterangan)
            VALUES (?, ?, 'REMOTE', NOW(), 'remote', 'granted', 'REMOTE_UNLOCK')`,
           [room.id_room, actorUserId]
         );
+        broadcast('ACCESS_LOG', {
+          id_log: resInsert.insertId,
+          kode_ruangan: kodeUpper,
+          nama_ruangan: room.nama_ruangan,
+          id_user: actorUserId,
+          nama_lengkap: actorName,
+          nim_nip: '-',
+          role: isAdminActor ? 'admin' : 'user',
+          rfid_uid_tap: 'REMOTE',
+          waktu_tap: new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 19).replace('T', ' '),
+          metode_akses: 'remote',
+          status_akses: 'granted',
+          keterangan: 'REMOTE_UNLOCK',
+        });
       }
 
       broadcastStats();
