@@ -495,7 +495,7 @@ app.get('/api/schedules', async (req, res) => {
   let room = String(req.query.room || '').toUpperCase();
   try {
     let sql = `
-      SELECT u.rfid_uid, r.kode_ruangan, s.tanggal_akses, s.jam_mulai, s.jam_selesai
+      SELECT u.rfid_uid, u.nama_lengkap, r.kode_ruangan, s.tanggal_akses, s.jam_mulai, s.jam_selesai
         FROM schedules s
         JOIN users u ON u.id_user = s.id_user
         JOIN rooms r ON r.id_room = s.id_room
@@ -511,9 +511,10 @@ app.get('/api/schedules', async (req, res) => {
 
     const [rows] = await db.query(sql, params);
 
-    // Format output persis sesuai spesifikasi Bab 3 & firmware ESP32
+    // Format output persis sesuai spesifikasi Bab 3 & firmware ESP32 + nama pemilik
     res.json(rows.map(r => ({
       uid: r.rfid_uid,
+      name: r.nama_lengkap,
       roomId: r.kode_ruangan,
       date: r.tanggal_akses,
       start: r.jam_mulai.slice(0, 5),
@@ -522,6 +523,26 @@ app.get('/api/schedules', async (req, res) => {
     })));
   } catch (e) {
     console.error('[API] Error schedules for ESP32:', e);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+// GET /api/cards - Daftar kartu RFID terdaftar beserta nama pemiliknya untuk tampilan LCD ESP32
+app.get('/api/cards', async (req, res) => {
+  if (req.get('x-api-key') !== API_KEY) {
+    return res.status(401).json({ error: 'unauthorized', message: 'API Key tidak valid' });
+  }
+
+  try {
+    const [rows] = await db.query(
+      'SELECT rfid_uid, nama_lengkap FROM users WHERE rfid_uid IS NOT NULL AND rfid_uid != ""'
+    );
+    res.json(rows.map(r => ({
+      uid: r.rfid_uid,
+      name: r.nama_lengkap,
+    })));
+  } catch (e) {
+    console.error('[API] Error cards for ESP32:', e);
     res.status(500).json({ error: 'db_error' });
   }
 });

@@ -22,6 +22,7 @@ const char* WIFI_SSID    = "Sambilegi 21";
 const char* WIFI_PASS    = "maguwoharjo";
 
 const char* API_URL      = "https://smart-room-access-production.up.railway.app/api/schedules";
+const char* API_CARDS    = "https://smart-room-access-production.up.railway.app/api/cards";
 const char* API_KEY      = "KELOMPOKIOTEMAS";
 
 const char* MQTT_HOST    = "ua921aa1.ala.asia-southeast1.emqxsl.com";
@@ -60,7 +61,7 @@ const char* MQTT_PASS    = "smartroom-expo-IF-A";
 #define RELAY_BUKA      HIGH  // Ubah ke LOW jika modul relay Active-LOW
 
 const unsigned long OPEN_MS        = 4000;     // durasi solenoid terbuka (4 detik)
-const unsigned long FETCH_INTERVAL = 300000;   // ambil jadwal tiap 5 menit
+const unsigned long FETCH_INTERVAL = 60000;    // ambil jadwal & kartu tiap 1 menit
 const long          CACHE_TTL_SEC  = 86400;    // cache berlaku 24 jam
 
 // Objek Hardware
@@ -76,7 +77,7 @@ PubSubClient mqtt(netClient);
 unsigned long relay1OffAt = 0, relay2OffAt = 0, relay3OffAt = 0;
 bool relay1Open = false, relay2Open = false, relay3Open = false;
 
-unsigned long msgUntil = 0, lastFetch = 0, lastMqttTry = 0, lastFlush = 0, lastRfidCheck = 0;
+unsigned long msgUntil = 0, lastFetch = 0, lastMqttTry = 0, lastFlush = 0, lastRfidCheck = 0, lastClockTick = 0;
 
 enum ValidationResult {
   RES_OK,
@@ -161,10 +162,56 @@ bool fetchSchedule() {
   return true;
 }
 
+// Ambil daftar kartu terdaftar & nama pemilik untuk tampilan LCD
+bool fetchCards() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+  HTTPClient http;
+  http.begin(API_CARDS);
+  http.addHeader("x-api-key", API_KEY);
+  http.setTimeout(5000);
+  int code = http.GET();
+  if (code != 200) {
+    http.end();
+    return false;
+  }
+  String body = http.getString();
+  http.end();
+
+  JsonDocument doc;
+  if (deserializeJson(doc, body) || !doc.is<JsonArray>()) return false;
+
+  File f = SPIFFS.open("/cards.json", "w");
+  if (!f) return false;
+  f.print(body); f.close();
+  Serial.println("[SPIFFS] Daftar pemilik kartu RFID diperbarui");
+  return true;
+}
+
+// Cari nama pemilik kartu di /cards.json
+String lookupCardName(const String& uid) {
+  File f = SPIFFS.open("/cards.json", "r");
+  if (!f) return "";
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) return "";
+
+  for (JsonObject c : doc.as<JsonArray>()) {
+    if (String((const char*)c["uid"]).equalsIgnoreCase(uid)) {
+      return String((const char*)c["name"]);
+    }
+  }
+  return "";
+}
+
 // ---------- VALIDASI AKSES SESUAI JADWAL RUANGAN ----------
-ValidationResult validate(const String& uid, const char* targetRoom, unsigned long* remainingMsOut = nullptr) {
+ValidationResult validate(const String& uid, const char* targetRoom, unsigned long* remainingMsOut = nullptr, String* ownerNameOut = nullptr, String* endTimeOut = nullptr) {
   if (!timeValid()) return RES_NO_TIME;
   if (!cacheFresh()) return RES_NO_CACHE;
+
+  String knownName = lookupCardName(uid);
+  bool uidFound = knownName.length() > 0;
+  if (ownerNameOut != nullptr && uidFound) *ownerNameOut = knownName;
 
   File f = SPIFFS.open("/schedule.json", "r");
   if (!f) return RES_NO_CACHE;
@@ -176,12 +223,14 @@ ValidationResult validate(const String& uid, const char* targetRoom, unsigned lo
   char date[11], hm[6], iso[20]; time_t ep;
   nowStrings(date, hm, iso, &ep);
 
-  bool uidFound = false;
   bool hasActiveTime = false;
 
   for (JsonObject s : doc.as<JsonArray>()) {
     if (!String((const char*)s["uid"]).equalsIgnoreCase(uid)) continue;
     uidFound = true;
+    if (ownerNameOut != nullptr && ownerNameOut->length() == 0 && s["name"].is<const char*>()) {
+      *ownerNameOut = String((const char*)s["name"]);
+    }
 
     // Periksa tanggal hari ini & status disetujui & jam aktif
     if (String((const char*)s["date"]) == date &&
@@ -191,11 +240,12 @@ ValidationResult validate(const String& uid, const char* targetRoom, unsigned lo
       hasActiveTime = true;
       // Periksa apakah ruangan sesuai dengan reader yang di-tap
       if (String((const char*)s["roomId"]).equalsIgnoreCase(targetRoom)) {
+        String endStr = String((const char*)s["end"]);
+        if (endTimeOut != nullptr) *endTimeOut = endStr;
         if (remainingMsOut != nullptr) {
           struct tm ti;
           if (getLocalTime(&ti, 100)) {
             int nowSec = ti.tm_hour * 3600 + ti.tm_min * 60 + ti.tm_sec;
-            String endStr = String((const char*)s["end"]);
             int endH = endStr.substring(0, 2).toInt();
             int endM = endStr.substring(3, 5).toInt();
             int endSec = endH * 3600 + endM * 60;
@@ -370,37 +420,43 @@ void handleCard(int roomNumber, const char* roomCode, const String& uid) {
   Serial.printf("\n[RFID %d - %s] Kartu Terdeteksi! UID: %s\n", roomNumber, roomCode, uid.c_str());
   lcdShow(String("Tap: ") + roomCode, "Memvalidasi...");
   unsigned long remainingMs = OPEN_MS;
-  ValidationResult r = validate(uid, roomCode, &remainingMs);
+  String ownerName = "";
+  String endTimeStr = "";
+  ValidationResult r = validate(uid, roomCode, &remainingMs, &ownerName, &endTimeStr);
+
+  String displayName = ownerName.length() > 0 ? ownerName : uid;
 
   switch (r) {
     case RES_OK: {
-      lcdShow("Akses Diterima", String("Ruang ") + roomCode);
       openDoor(roomNumber, remainingMs);
+      String rTag = String(roomCode);
+      String topLine = "OK " + rTag + (rTag.length() < 6 ? " " : "") + "->" + (endTimeStr.length() ? endTimeStr : "OPEN");
+      lcdShow(topLine, displayName);
       publishLog(roomCode, uid, true, "OK", "rfid");
       break;
     }
     case RES_WRONG_ROOM:
-      lcdShow("Akses Ditolak", "Salah Ruangan!");
+      lcdShow("SALAH RUANGAN!", displayName);
       publishLog(roomCode, uid, false, "WRONG_ROOM", "rfid");
       break;
     case RES_NO_UID:
-      lcdShow("Akses Ditolak", "Kartu Tidak Ada");
+      lcdShow("KARTU TDK KENAL", uid);
       publishLog(roomCode, uid, false, "UID_UNKNOWN", "rfid");
       break;
     case RES_NO_SCHEDULE:
-      lcdShow("Akses Ditolak", "Jadwal Salah");
+      lcdShow("TDK ADA JADWAL", displayName);
       publishLog(roomCode, uid, false, "SCHEDULE_MISMATCH", "rfid");
       break;
     case RES_NO_TIME:
-      lcdShow("Waktu Gagal", "Akses Ditolak");
+      lcdShow("WAKTU TDK VALID", "Akses Ditolak");
       publishLog(roomCode, uid, false, "TIME_INVALID", "rfid");
       break;
     case RES_NO_CACHE:
-      lcdShow("Data Jadwal", "Tidak Tersedia");
+      lcdShow("DATA JADWAL", "Tidak Tersedia");
       publishLog(roomCode, uid, false, "NO_CACHE", "rfid");
       break;
   }
-  msgUntil = millis() + 2500;
+  msgUntil = millis() + 3000;
 }
 
 String readUid(MFRC522& reader) {
@@ -472,6 +528,7 @@ void setup() {
     unsigned long t1 = millis();
     while (!timeValid() && millis() - t1 < 8000) delay(200);
     fetchSchedule();
+    fetchCards();
   }
   lastFetch = millis();
   showStandby();
@@ -517,10 +574,17 @@ void loop() {
     flushPending();
   }
 
-  // Refresh berkala jadwal dari backend tiap 5 menit
+  // Refresh berkala jadwal & daftar kartu dari backend tiap 1 menit
   if (millis() - lastFetch >= FETCH_INTERVAL) {
     lastFetch = millis();
     fetchSchedule();
+    fetchCards();
+  }
+
+  // Perbarui jam WIB & status ruangan di LCD standby tiap 30 detik
+  if (!msgUntil && millis() - lastClockTick >= 30000) {
+    lastClockTick = millis();
+    showStandby();
   }
 
   // Jaga kesehatan 3 reader MFRC522 tiap 10 detik (auto-recover jika bus SPI hang/noise)
