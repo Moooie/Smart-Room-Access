@@ -97,19 +97,32 @@ void lcdShow(const String& a, const String& b) {
   lcd.setCursor(0, 1); lcd.print(y.substring(0, 16));
 }
 
-void showStandby() {
-  if (WiFi.status() != WL_CONNECTED) {
-    lcdShow("WiFi Offline", "Mode Lokal (1-3)");
-  } else {
-    lcdShow("Smart Room Acces", "Tap Kartu (1-3)");
-  }
-}
-
 // ---------- WAKTU (NTP, WIB) ----------
 bool timeValid() {
   struct tm t;
   if (!getLocalTime(&t, 10)) return false;
   return (t.tm_year + 1900) >= 2025;
+}
+
+void showStandby() {
+  char line1[17];
+  if (WiFi.status() != WL_CONNECTED) {
+    snprintf(line1, sizeof(line1), "Offln  M   K   H");
+  } else if (timeValid()) {
+    struct tm t;
+    getLocalTime(&t, 10);
+    snprintf(line1, sizeof(line1), "%02d:%02d  M   K   H", t.tm_hour, t.tm_min);
+  } else {
+    snprintf(line1, sizeof(line1), "Ready  M   K   H");
+  }
+
+  const char* s1 = relay1Open ? "BUK" : "KNC";
+  const char* s2 = relay2Open ? "BUK" : "KNC";
+  const char* s3 = relay3Open ? "BUK" : "KNC";
+  char line2[17];
+  snprintf(line2, sizeof(line2), "WIB  %s %s %s", s1, s2, s3);
+
+  lcdShow(String(line1), String(line2));
 }
 
 void nowStrings(char* date, char* hm, char* iso, time_t* epoch) {
