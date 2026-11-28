@@ -527,6 +527,13 @@ app.get('/api/schedules', async (req, res) => {
   }
 });
 
+// Helper: Beri tahu ESP32 via MQTT agar segera sinkronisasi jadwal & kartu terbaru
+function notifyEspSync(reason = 'update') {
+  if (mqttClient && mqttClient.connected) {
+    mqttClient.publish('room/sync', reason, { qos: 0 });
+  }
+}
+
 // GET /api/cards - Daftar kartu RFID terdaftar beserta nama pemiliknya untuk tampilan LCD ESP32
 app.get('/api/cards', async (req, res) => {
   if (req.get('x-api-key') !== API_KEY) {
@@ -535,7 +542,7 @@ app.get('/api/cards', async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      'SELECT rfid_uid, nama_lengkap FROM users WHERE rfid_uid IS NOT NULL AND rfid_uid != ""'
+      "SELECT rfid_uid, nama_lengkap FROM users WHERE rfid_uid IS NOT NULL AND rfid_uid != ''"
     );
     res.json(rows.map(r => ({
       uid: r.rfid_uid,
@@ -543,6 +550,47 @@ app.get('/api/cards', async (req, res) => {
     })));
   } catch (e) {
     console.error('[API] Error cards for ESP32:', e);
+    res.status(500).json({ error: 'db_error' });
+  }
+});
+
+// GET /api/esp-sync - Gabungan jadwal approved + daftar kartu dalam 1 request (hemat RAM & TLS ESP32)
+app.get('/api/esp-sync', async (req, res) => {
+  if (req.get('x-api-key') !== API_KEY) {
+    return res.status(401).json({ error: 'unauthorized', message: 'API Key tidak valid' });
+  }
+
+  try {
+    const [schedRows] = await db.query(`
+      SELECT u.rfid_uid, u.nama_lengkap, r.kode_ruangan, s.tanggal_akses, s.jam_mulai, s.jam_selesai
+        FROM schedules s
+        JOIN users u ON u.id_user = s.id_user
+        JOIN rooms r ON r.id_room = s.id_room
+       WHERE s.status_jadwal = 'approved'
+         AND s.tanggal_akses BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+         AND u.rfid_uid IS NOT NULL
+    `);
+    const [cardRows] = await db.query(
+      "SELECT rfid_uid, nama_lengkap FROM users WHERE rfid_uid IS NOT NULL AND rfid_uid != ''"
+    );
+
+    res.json({
+      schedules: schedRows.map(r => ({
+        uid: r.rfid_uid,
+        name: r.nama_lengkap,
+        roomId: r.kode_ruangan,
+        date: r.tanggal_akses,
+        start: r.jam_mulai.slice(0, 5),
+        end: r.jam_selesai.slice(0, 5),
+        approved: true,
+      })),
+      cards: cardRows.map(r => ({
+        uid: r.rfid_uid,
+        name: r.nama_lengkap,
+      })),
+    });
+  } catch (e) {
+    console.error('[API] Error esp-sync:', e);
     res.status(500).json({ error: 'db_error' });
   }
 });
@@ -973,6 +1021,7 @@ app.post('/api/schedules', verifyToken, async (req, res) => {
 
     broadcast('SCHEDULE_UPDATE', { action: 'CREATED', schedule: newSchedule });
     broadcastStats();
+    if (initialStatus === 'approved') notifyEspSync('schedule_created');
 
     res.status(201).json({
       message: initialStatus === 'approved' ? 'Jadwal berhasil dibuat dan disetujui' : 'Pengajuan jadwal berhasil disimpan (Menunggu Persetujuan Admin)',
@@ -1026,6 +1075,7 @@ app.patch('/api/schedules/:id/status', verifyToken, requireAdmin, async (req, re
 
     broadcast('SCHEDULE_UPDATE', { action: 'STATUS_CHANGED', id_schedule: scheduleId, status_jadwal });
     broadcastStats();
+    notifyEspSync('schedule_status');
 
     res.json({ message: `Status jadwal berhasil diubah menjadi ${status_jadwal}`, id_schedule: scheduleId, status_jadwal });
   } catch (err) {
@@ -1058,6 +1108,7 @@ app.delete('/api/schedules/:id', verifyToken, async (req, res) => {
 
     broadcast('SCHEDULE_UPDATE', { action: 'DELETED', id_schedule: scheduleId });
     broadcastStats();
+    notifyEspSync('schedule_deleted');
 
     res.json({ message: 'Jadwal berhasil dihapus', id_schedule: scheduleId });
   } catch (err) {
@@ -1157,6 +1208,7 @@ app.post('/api/users', verifyToken, requireAdmin, async (req, res) => {
       [nim_nip.trim(), nama_lengkap.trim(), email ? email.trim() : null, cleanUid, cardLabel, passwordHash, userRole]
     );
 
+    notifyEspSync('user_created');
     res.status(201).json({
       message: 'Pengguna baru berhasil ditambahkan',
       user: {
@@ -1222,6 +1274,7 @@ app.put('/api/users/:id', verifyToken, requireAdmin, async (req, res) => {
       );
     }
 
+    notifyEspSync('user_updated');
     res.json({
       message: 'Data pengguna berhasil diperbarui',
       user: {
@@ -1250,6 +1303,7 @@ app.delete('/api/users/:id', verifyToken, requireAdmin, async (req, res) => {
 
   try {
     await db.query('DELETE FROM users WHERE id_user = ?', [userId]);
+    notifyEspSync('user_deleted');
     res.json({ message: 'Pengguna berhasil dihapus', id_user: userId });
   } catch (err) {
     console.error('[API] DELETE /api/users/:id error:', err);

@@ -21,8 +21,7 @@
 const char* WIFI_SSID    = "Sambilegi 21";
 const char* WIFI_PASS    = "maguwoharjo";
 
-const char* API_URL      = "https://smart-room-access-production.up.railway.app/api/schedules";
-const char* API_CARDS    = "https://smart-room-access-production.up.railway.app/api/cards";
+const char* API_SYNC     = "https://smart-room-access-production.up.railway.app/api/esp-sync";
 const char* API_KEY      = "KELOMPOKIOTEMAS";
 
 const char* MQTT_HOST    = "ua921aa1.ala.asia-southeast1.emqxsl.com";
@@ -61,7 +60,7 @@ const char* MQTT_PASS    = "smartroom-expo-IF-A";
 #define RELAY_BUKA      HIGH  // Ubah ke LOW jika modul relay Active-LOW
 
 const unsigned long OPEN_MS        = 4000;     // durasi solenoid terbuka (4 detik)
-const unsigned long FETCH_INTERVAL = 60000;    // ambil jadwal & kartu tiap 1 menit
+const unsigned long FETCH_INTERVAL = 180000;   // backup sync tiap 3 menit (update real-time via MQTT room/sync)
 const long          CACHE_TTL_SEC  = 86400;    // cache berlaku 24 jam
 
 // Objek Hardware
@@ -78,6 +77,7 @@ unsigned long relay1OffAt = 0, relay2OffAt = 0, relay3OffAt = 0;
 bool relay1Open = false, relay2Open = false, relay3Open = false;
 
 unsigned long msgUntil = 0, lastFetch = 0, lastMqttTry = 0, lastFlush = 0, lastRfidCheck = 0, lastClockTick = 0;
+bool needSync = false;
 
 enum ValidationResult {
   RES_OK,
@@ -130,16 +130,19 @@ bool cacheFresh() {
   return saved > 0 && (now - saved) < CACHE_TTL_SEC;
 }
 
-// Ambil jadwal seluruh ruangan (room=ALL) dari server backend
-bool fetchSchedule() {
+// Ambil gabungan jadwal + daftar pemilik kartu dalam 1x HTTPS request (hemat RAM & stabilkan MQTT)
+bool fetchAllData() {
   if (WiFi.status() != WL_CONNECTED) return false;
+  WiFiClientSecure syncClient;
+  syncClient.setInsecure();
   HTTPClient http;
-  http.begin(String(API_URL) + "?room=ALL");
+  http.begin(syncClient, API_SYNC);
   http.addHeader("x-api-key", API_KEY);
-  http.setTimeout(5000);
+  http.setConnectTimeout(3000);
+  http.setTimeout(3500);
   int code = http.GET();
   if (code != 200) {
-    Serial.printf("[HTTP] Fetch jadwal gagal, kode: %d\n", code);
+    Serial.printf("[HTTP] Sync gagal, kode: %d\n", code);
     http.end();
     return false;
   }
@@ -147,43 +150,34 @@ bool fetchSchedule() {
   http.end();
 
   JsonDocument doc;
-  if (deserializeJson(doc, body) || !doc.is<JsonArray>()) return false;
-
-  File f = SPIFFS.open("/schedule.json", "w");
-  if (!f) return false;
-  f.print(body); f.close();
-
-  if (timeValid()) {
-    time_t now; time(&now);
-    File m = SPIFFS.open("/meta.txt", "w");
-    m.print((long)now); m.close();
-  }
-  Serial.println("[SPIFFS] Jadwal 3 ruangan berhasil diperbarui & disimpan");
-  return true;
-}
-
-// Ambil daftar kartu terdaftar & nama pemilik untuk tampilan LCD
-bool fetchCards() {
-  if (WiFi.status() != WL_CONNECTED) return false;
-  HTTPClient http;
-  http.begin(API_CARDS);
-  http.addHeader("x-api-key", API_KEY);
-  http.setTimeout(5000);
-  int code = http.GET();
-  if (code != 200) {
-    http.end();
+  if (deserializeJson(doc, body)) {
+    Serial.println("[HTTP] JSON sync tidak valid");
     return false;
   }
-  String body = http.getString();
-  http.end();
 
-  JsonDocument doc;
-  if (deserializeJson(doc, body) || !doc.is<JsonArray>()) return false;
+  if (doc["schedules"].is<JsonArray>()) {
+    File f = SPIFFS.open("/schedule.json", "w");
+    if (f) {
+      serializeJson(doc["schedules"], f);
+      f.close();
+    }
+    if (timeValid()) {
+      time_t now; time(&now);
+      File m = SPIFFS.open("/meta.txt", "w");
+      if (m) { m.print((long)now); m.close(); }
+    }
+  }
 
-  File f = SPIFFS.open("/cards.json", "w");
-  if (!f) return false;
-  f.print(body); f.close();
-  Serial.println("[SPIFFS] Daftar pemilik kartu RFID diperbarui");
+  if (doc["cards"].is<JsonArray>()) {
+    File f = SPIFFS.open("/cards.json", "w");
+    if (f) {
+      serializeJson(doc["cards"], f);
+      f.close();
+    }
+  }
+
+  Serial.printf("[SPIFFS] Sync OK: %d jadwal, %d kartu terdaftar\n",
+                doc["schedules"].size(), doc["cards"].size());
   return true;
 }
 
@@ -377,19 +371,24 @@ void mqttReconnect() {
     mqtt.publish("room/kuning/status", "online", true);
     mqtt.publish("room/hijau/status", "online", true);
 
-    // Dengarkan perintah buka pintu jarak jauh dari Admin
+    // Dengarkan perintah buka pintu jarak jauh & trigger sync real-time dari backend
     mqtt.subscribe("room/+/command", 1);
-    Serial.println("[MQTT] Terhubung! Status Online 3 Ruangan dipublikasikan & subscribe ke room/+/command");
+    mqtt.subscribe("room/sync", 0);
+    Serial.println("[MQTT] Terhubung! Status Online 3 Ruangan & subscribe command + sync");
   }
 }
 
-// Perintah Remote Unlock / Lock dari Web Dashboard Admin
+// Perintah Remote Unlock / Lock & Trigger Sync dari Web Dashboard
 void onMqttMessage(char* topic, byte* payload, unsigned int len) {
   String m;
   for (unsigned int i = 0; i < len; i++) m += (char)payload[i];
   m.trim();
 
   String t = String(topic);
+  if (t == "room/sync") {
+    needSync = true;
+    return;
+  }
   int firstSlash = t.indexOf('/');
   int secondSlash = t.indexOf('/', firstSlash + 1);
   String r = "MERAH";
@@ -436,7 +435,7 @@ void handleCard(int roomNumber, const char* roomCode, const String& uid) {
       break;
     }
     case RES_WRONG_ROOM:
-      lcdShow("SALAH RUANGAN!", displayName);
+      lcdShow(displayName, "Ditolak:S.Ruang!");
       publishLog(roomCode, uid, false, "WRONG_ROOM", "rfid");
       break;
     case RES_NO_UID:
@@ -444,7 +443,7 @@ void handleCard(int roomNumber, const char* roomCode, const String& uid) {
       publishLog(roomCode, uid, false, "UID_UNKNOWN", "rfid");
       break;
     case RES_NO_SCHEDULE:
-      lcdShow("TDK ADA JADWAL", displayName);
+      lcdShow(displayName, "Ditolak:NoJadwal");
       publishLog(roomCode, uid, false, "SCHEDULE_MISMATCH", "rfid");
       break;
     case RES_NO_TIME:
@@ -456,7 +455,7 @@ void handleCard(int roomNumber, const char* roomCode, const String& uid) {
       publishLog(roomCode, uid, false, "NO_CACHE", "rfid");
       break;
   }
-  msgUntil = millis() + 3000;
+  msgUntil = millis() + 2500;
 }
 
 String readUid(MFRC522& reader) {
@@ -522,13 +521,14 @@ void setup() {
   configTime(7 * 3600, 0, "pool.ntp.org", "time.google.com");
   netClient.setInsecure(); // Izinkan TLS port 8883 ke EMQX Cloud
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setKeepAlive(60);     // Cegah putus MQTT saat HTTPS sync
+  mqtt.setSocketTimeout(5);
   mqtt.setCallback(onMqttMessage);
 
   if (WiFi.status() == WL_CONNECTED) {
     unsigned long t1 = millis();
     while (!timeValid() && millis() - t1 < 8000) delay(200);
-    fetchSchedule();
-    fetchCards();
+    fetchAllData();
   }
   lastFetch = millis();
   showStandby();
@@ -574,11 +574,11 @@ void loop() {
     flushPending();
   }
 
-  // Refresh berkala jadwal & daftar kartu dari backend tiap 1 menit
-  if (millis() - lastFetch >= FETCH_INTERVAL) {
+  // Sync cepat jika ada update dari dashboard (via MQTT room/sync) atau backup tiap 3 menit
+  if (needSync || (millis() - lastFetch >= FETCH_INTERVAL)) {
+    needSync = false;
     lastFetch = millis();
-    fetchSchedule();
-    fetchCards();
+    fetchAllData();
   }
 
   // Perbarui jam WIB & status ruangan di LCD standby tiap 30 detik
