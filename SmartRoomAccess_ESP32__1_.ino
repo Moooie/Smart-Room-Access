@@ -18,8 +18,8 @@
 // ==========================================
 // KONFIGURASI WI-FI & SERVER
 // ==========================================
-const char* WIFI_SSID    = "Sambilegi 21";
-const char* WIFI_PASS    = "maguwoharjo";
+const char* WIFI_SSID    = "Cihuy";
+const char* WIFI_PASS    = "ambatu1234";
 
 const char* API_URL      = "https://smart-room-access-production.up.railway.app/api/schedules";
 const char* API_KEY      = "KELOMPOKIOTEMAS";
@@ -47,8 +47,8 @@ const char* MQTT_PASS    = "smartroom-expo-IF-A";
 #define RST_3_PIN       33
 
 // PIN RELAY SOLENOID (1 PER RUANGAN)
-#define RELAY_1_PIN     13    // Solenoid Ruang Merah
-#define RELAY_2_PIN     4     // Solenoid Ruang Kuning
+#define RELAY_1_PIN     4     // Solenoid Ruang Merah
+#define RELAY_2_PIN     13    // Solenoid Ruang Kuning
 #define RELAY_3_PIN     25    // Solenoid Ruang Hijau
 
 // PIN I2C LCD 16x2
@@ -76,7 +76,7 @@ PubSubClient mqtt(netClient);
 unsigned long relay1OffAt = 0, relay2OffAt = 0, relay3OffAt = 0;
 bool relay1Open = false, relay2Open = false, relay3Open = false;
 
-unsigned long msgUntil = 0, lastFetch = 0, lastMqttTry = 0, lastFlush = 0;
+unsigned long msgUntil = 0, lastFetch = 0, lastMqttTry = 0, lastFlush = 0, lastRfidCheck = 0;
 
 enum ValidationResult {
   RES_OK,
@@ -428,6 +428,7 @@ void setup() {
   // 5. Koneksi Wi-Fi menggunakan WiFiManager (bisa ganti Wi-Fi dari HP di lokasi Expo)
   lcdShow("Setup WiFi...", "AP:SmartRoomExpo");
   WiFiManager wm;
+  wm.resetSettings(); // Hapus Wi-Fi tersimpan (hapus baris ini setelah selesai setup Wi-Fi baru)
   wm.setConfigPortalTimeout(180); // batas waktu portal 3 menit
   if (!wm.autoConnect("SmartRoom-Expo-Setup", "12345678")) {
     Serial.println("[WiFi] Gagal konek / timeout, lanjut Mode Lokal (SPIFFS)");
@@ -485,6 +486,22 @@ void loop() {
     fetchSchedule();
   }
 
+  // Jaga kesehatan 3 reader MFRC522 tiap 10 detik (auto-recover jika bus SPI hang/noise)
+  if (!msgUntil && millis() - lastRfidCheck >= 10000) {
+    lastRfidCheck = millis();
+    auto recoverRfid = [](MFRC522& r, byte ss1, byte ss2) {
+      digitalWrite(ss1, HIGH);
+      digitalWrite(ss2, HIGH);
+      byte v = r.PCD_ReadRegister(MFRC522::VersionReg);
+      if (v == 0x00 || v == 0xFF) {
+        r.PCD_Init();
+      }
+    };
+    recoverRfid(rfid1, SS_2_PIN, SS_3_PIN);
+    recoverRfid(rfid2, SS_1_PIN, SS_3_PIN);
+    recoverRfid(rfid3, SS_1_PIN, SS_2_PIN);
+  }
+
   // Kembali ke tampilan standby
   if (msgUntil && millis() >= msgUntil) {
     msgUntil = 0;
@@ -523,4 +540,5 @@ void loop() {
       rfid3.PCD_StopCrypto1();
     }
   }
+  delay(20); // Beri jeda agar bus SPI MFRC522 tidak overload/hang
 }
